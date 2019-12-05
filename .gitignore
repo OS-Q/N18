@@ -1,3 +1,7 @@
 *.pyc
 .pio/
 .vscode/
+*.py[cod]
+
+# Distribution dir
+dist
