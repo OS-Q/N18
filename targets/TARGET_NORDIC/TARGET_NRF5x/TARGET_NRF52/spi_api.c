@@ -350,8 +350,9 @@ int spi_master_write(spi_t *obj, int value)
     desc.tx_length = 1;
     desc.rx_length = 1;
     ret = nrfx_spi_xfer(&nordic_nrf5_spi_instance[instance], &desc, 0);
+
     if (ret != NRFX_SUCCESS){
-         DEBUG_PRINTF("%d error returned from nrf_spi_xfer\r\n");
+        DEBUG_PRINTF("%d error returned from nrf_spi_xfer\n\r");
     }
 
     /* Manually set chip select pin if defined. */
