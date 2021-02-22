@@ -31,6 +31,8 @@
 
 static const uint8_t mac_helper_default_key_source[8] = {0xff, 0, 0, 0, 0, 0, 0, 0};
 
+uint16_t test_6lowpan_fragmentation_mtu_size_override = 0;
+
 static uint8_t mac_helper_header_security_aux_header_length(uint8_t keyIdmode);
 static uint8_t mac_helper_security_mic_length_get(uint8_t security_level);
 static void mac_helper_keytable_pairwise_descriptor_set(struct mac_api_s *api, const uint8_t *key, const uint8_t *mac64, uint8_t attribute_id);
@@ -736,7 +738,11 @@ uint_fast16_t mac_helper_max_payload_size(protocol_interface_info_entry_t *cur, 
 {
     uint16_t max;
 
-    max = cur->mac_api->phyMTU - frame_overhead;
+    if (test_6lowpan_fragmentation_mtu_size_override == 0) {
+        max = cur->mac_api->phyMTU - frame_overhead;
+    } else {
+        max = test_6lowpan_fragmentation_mtu_size_override - frame_overhead;
+    }
 
     /* But if we want IEEE 802.15.4-2003 compatibility (and it looks like a
      * standard PHY), limit ourselves to the 2003 maximum */
@@ -744,6 +750,7 @@ uint_fast16_t mac_helper_max_payload_size(protocol_interface_info_entry_t *cur, 
             cur->mac_api->phyMTU == MAC_IEEE_802_15_4_MAX_PHY_PACKET_SIZE) {
         max = MAC_IEEE_802_15_4_MAX_MAC_SAFE_PAYLOAD_SIZE;
     }
+
     return max;
 }
 
@@ -837,15 +844,9 @@ int8_t mac_helper_link_frame_counter_read(int8_t interface_id, uint32_t *seq_ptr
     if (!cur || !cur->mac_api || !seq_ptr) {
         return -1;
     }
-    mlme_get_t get_req;
-    get_req.attr = macFrameCounter;
-    get_req.attr_index = cur->mac_parameters->mac_default_key_attribute_id;
-    cur->mac_api->mlme_req(cur->mac_api, MLME_GET, &get_req);
-    *seq_ptr = cur->mac_parameters->security_frame_counter;
 
-    return 0;
+    return mac_helper_key_link_frame_counter_read(interface_id, seq_ptr, cur->mac_parameters->mac_default_key_attribute_id);
 }
-
 
 int8_t mac_helper_link_frame_counter_set(int8_t interface_id, uint32_t seq_ptr)
 {
@@ -854,9 +855,36 @@ int8_t mac_helper_link_frame_counter_set(int8_t interface_id, uint32_t seq_ptr)
     if (!cur || !cur->mac_api) {
         return -1;
     }
+
+    return mac_helper_key_link_frame_counter_set(interface_id, seq_ptr, cur->mac_parameters->mac_default_key_attribute_id);
+}
+
+int8_t mac_helper_key_link_frame_counter_read(int8_t interface_id, uint32_t *seq_ptr, uint8_t descriptor)
+{
+    protocol_interface_info_entry_t *cur = protocol_stack_interface_info_get_by_id(interface_id);
+
+    if (!cur || !cur->mac_api || !seq_ptr) {
+        return -1;
+    }
+    mlme_get_t get_req;
+    get_req.attr = macFrameCounter;
+    get_req.attr_index = descriptor;
+    cur->mac_api->mlme_req(cur->mac_api, MLME_GET, &get_req);
+    *seq_ptr = cur->mac_parameters->security_frame_counter;
+
+    return 0;
+}
+
+int8_t mac_helper_key_link_frame_counter_set(int8_t interface_id, uint32_t seq_ptr, uint8_t descriptor)
+{
+    protocol_interface_info_entry_t *cur = protocol_stack_interface_info_get_by_id(interface_id);
+
+    if (!cur || !cur->mac_api) {
+        return -1;
+    }
     mlme_set_t set_req;
     set_req.attr = macFrameCounter;
-    set_req.attr_index = cur->mac_parameters->mac_default_key_attribute_id;
+    set_req.attr_index = descriptor;
     set_req.value_pointer = &seq_ptr;
     set_req.value_size = 4;
     cur->mac_api->mlme_req(cur->mac_api, MLME_SET, &set_req);
@@ -866,6 +894,7 @@ int8_t mac_helper_link_frame_counter_set(int8_t interface_id, uint32_t seq_ptr)
 
 void mac_helper_devicetable_remove(mac_api_t *mac_api, uint8_t attribute_index, uint8_t *mac64)
 {
+    (void) mac64;
     if (!mac_api) {
         return;
     }
@@ -878,11 +907,13 @@ void mac_helper_devicetable_remove(mac_api_t *mac_api, uint8_t attribute_index, 
     set_req.attr_index = attribute_index;
     set_req.value_pointer = (void *)&device_desc;
     set_req.value_size = sizeof(mlme_device_descriptor_t);
-    tr_debug("Unregister Device %u, mac64: %s", attribute_index, trace_array(mac64, 8));
+    if (mac64) {
+        tr_debug("Unregister Device %u, mac64: %s", attribute_index, trace_array(mac64, 8));
+    }
     mac_api->mlme_req(mac_api, MLME_SET, &set_req);
 }
 
-void mac_helper_device_description_write(protocol_interface_info_entry_t *cur, mlme_device_descriptor_t *device_desc, uint8_t *mac64, uint16_t mac16, uint32_t frame_counter, bool exempt)
+void mac_helper_device_description_write(protocol_interface_info_entry_t *cur, mlme_device_descriptor_t *device_desc, const uint8_t *mac64, uint16_t mac16, uint32_t frame_counter, bool exempt)
 {
     memcpy(device_desc->ExtAddress, mac64, 8);
     device_desc->ShortAddress = mac16;
@@ -892,14 +923,19 @@ void mac_helper_device_description_write(protocol_interface_info_entry_t *cur, m
 }
 
 void mac_helper_devicetable_set(const mlme_device_descriptor_t *device_desc, protocol_interface_info_entry_t *cur, uint8_t attribute_index, uint8_t keyID, bool force_set)
-
 {
-    if (!cur->mac_api) {
+    if (!force_set && cur->mac_parameters->SecurityEnabled && cur->mac_parameters->mac_default_key_index != keyID) {
+        tr_debug("Do not set counter by index %u != %u", cur->mac_parameters->mac_default_key_index, keyID);
         return;
     }
 
-    if (!force_set && cur->mac_parameters->SecurityEnabled && cur->mac_parameters->mac_default_key_index != keyID) {
-        tr_debug("Do not set counter by index %u != %u", cur->mac_parameters->mac_default_key_index, keyID);
+    tr_debug("Register Device %u, mac16 %x mac64: %s, %"PRIu32, attribute_index, device_desc->ShortAddress, trace_array(device_desc->ExtAddress, 8), device_desc->FrameCounter);
+    mac_helper_devicetable_direct_set(cur->mac_api, device_desc, attribute_index);
+}
+
+void mac_helper_devicetable_direct_set(struct mac_api_s *mac_api, const mlme_device_descriptor_t *device_desc, uint8_t attribute_index)
+{
+    if (!mac_api) {
         return;
     }
 
@@ -908,10 +944,8 @@ void mac_helper_devicetable_set(const mlme_device_descriptor_t *device_desc, pro
     set_req.attr_index = attribute_index;
     set_req.value_pointer = (void *)device_desc;
     set_req.value_size = sizeof(mlme_device_descriptor_t);
-    tr_debug("Register Device %u, mac16 %x mac64: %s, %"PRIu32, attribute_index, device_desc->ShortAddress, trace_array(device_desc->ExtAddress, 8), device_desc->FrameCounter);
-    cur->mac_api->mlme_req(cur->mac_api, MLME_SET, &set_req);
+    mac_api->mlme_req(mac_api, MLME_SET, &set_req);
 }
-
 
 int8_t mac_helper_mac_mlme_max_retry_set(int8_t interface_id, uint8_t mac_retry_set)
 {
@@ -927,5 +961,42 @@ int8_t mac_helper_mac_mlme_max_retry_set(int8_t interface_id, uint8_t mac_retry_
     set_req.value_size = 1;
     cur->mac_api->mlme_req(cur->mac_api, MLME_SET, &set_req);
 
+    return 0;
+}
+
+
+int8_t mac_helper_mac_device_description_pan_id_update(int8_t interface_id, uint16_t pan_id)
+{
+    protocol_interface_info_entry_t *cur;
+    cur = protocol_stack_interface_info_get_by_id(interface_id);
+    if (!cur || !cur->mac_api) {
+        return -1;
+    }
+    mlme_set_t set_req;
+    set_req.attr = macDeviceDescriptionPanIDUpdate;
+    set_req.attr_index = 0;
+    set_req.value_pointer = &pan_id;
+    set_req.value_size = sizeof(pan_id);
+    cur->mac_api->mlme_req(cur->mac_api, MLME_SET, &set_req);
+    return 0;
+}
+
+int8_t mac_helper_start_auto_cca_threshold(int8_t interface_id, uint8_t number_of_channels, int8_t default_dbm, int8_t high_limit, int8_t low_limit)
+{
+    protocol_interface_info_entry_t *cur;
+    cur = protocol_stack_interface_info_get_by_id(interface_id);
+    if (!cur || !cur->mac_api) {
+        return -1;
+    }
+    uint8_t start_cca_thr[4] = {number_of_channels, default_dbm, high_limit, low_limit};
+    mlme_set_t set_req;
+    set_req.attr = macCCAThresholdStart;
+    set_req.value_pointer = &start_cca_thr;
+    set_req.value_size = sizeof(start_cca_thr);
+    cur->mac_api->mlme_req(cur->mac_api, MLME_SET, &set_req);
+    /* Get CCA threshold table. Table is stored to interface structure */
+    mlme_get_t get_req;
+    get_req.attr = macCCAThreshold;
+    cur->mac_api->mlme_req(cur->mac_api, MLME_GET, &get_req);
     return 0;
 }

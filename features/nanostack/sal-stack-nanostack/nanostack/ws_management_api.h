@@ -30,6 +30,7 @@
 
 #include "ns_types.h"
 #include "net_interface.h" /* Declaration for channel_list_s. */
+#include "fhss_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -75,11 +76,17 @@ extern "C" {
 #define CHANNEL_SPACING_100 0x03 // 100 khz
 #define CHANNEL_SPACING_250 0x04 // 250 khz
 
-#define NETWORK_SIZE_AUTOMATIC 0x00
-#define NETWORK_SIZE_SMALL 0x01
-#define NETWORK_SIZE_MEDIUM 0x08
-#define NETWORK_SIZE_LARGE 0x10
+/*
+ *  Network Size definitions are device amount in hundreds of devices.
+ *  These definitions are meant to give some estimates of sizes. Any value can be given as parameter
+ */
 
+#define NETWORK_SIZE_CERTIFICATE    0x00  // Network configuration used in Wi-SUN certification
+#define NETWORK_SIZE_SMALL          0x01  // Small networks
+#define NETWORK_SIZE_MEDIUM         0x08  // 100 - 800 device networks are medium sized
+#define NETWORK_SIZE_LARGE          0x0F  // 800 - 1500 device networks are large
+#define NETWORK_SIZE_XLARGE         0x19  // 2500+ devices
+#define NETWORK_SIZE_AUTOMATIC      0xFF
 
 /** Temporary API change flag. this will be removed when new version of API is implemented on applications
  *
@@ -95,6 +102,26 @@ typedef struct ws_statistics {
     /** Asynch RX counter */
     uint32_t asynch_rx_count;
 } ws_statistics_t;
+
+/**
+ * \brief Struct ws_info defines the Wi-SUN stack state.
+ */
+typedef struct ws_stack_info {
+    /** Parent link local address */
+    uint8_t parent[16];
+    /** parent RSSI Out measured RSSI value calculated using EWMA specified by Wi-SUN from range of -174 (0) to +80 (254) dBm.*/
+    uint8_t rsl_out;
+    /** parent RSSI in measured RSSI value calculated using EWMA specified by Wi-SUN from range of -174 (0) to +80 (254) dBm.*/
+    uint8_t rsl_in;
+    /** Device RF minimum sensitivity configuration. lowest level of radio signal strength packet heard. Range of -174 (0) to +80 (254) dBm*/
+    uint8_t device_min_sens;
+    /** ETX To border router */
+    uint16_t routing_cost;
+    /** Network PAN ID */
+    uint16_t pan_id;
+    /** Wi-SUN join state defined by Wi-SUN specification 1-5*/
+    uint8_t join_state;
+} ws_stack_info_t;
 
 /**
  * Initialize Wi-SUN stack.
@@ -132,21 +159,54 @@ int ws_management_network_name_set(
     char *network_name_ptr);
 
 /**
+ * Get the network name
+ *
+ * \param interface_id Network interface ID.
+ * \param network_name_ptr Nul terminated Network name limited to 32 characters.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_network_name_get(
+    int8_t interface_id,
+    char *network_name_ptr);
+
+/**
+ * Validate the network name
+ *
+ * \param interface_id Network interface ID.
+ * \param network_name_ptr Nul terminated Network name limited to 32 characters.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_network_name_validate(
+    int8_t interface_id,
+    char *network_name_ptr);
+
+/**
  * Configure regulatory domain of Wi-SUN stack.
  *
  * Change the default configuration for Wi-SUN PHY operation.
  *
  * Supported values:
- * Domain: "NA"(0x01), "KR"(0x09)
- * Operating class: (1), (2)
- * operation mode: "1b" (symbol rate 50, modulation index 1)
+ * Domain: "NA"(0x01), "KR"(0x09), "EU"(0x03), "IN"(0x05), "KR"(0x09), "JP"(0x09), "WW"(0x00)
+ * Operating class: (1), (2), (3), (4)
+ * Operation mode: "1a" (symbol rate 50, modulation index 0.5)
+ *                 "1b" (symbol rate 50, modulation index 1.0)
+ *                 "2a" (symbol rate 100, modulation index 0.5)
+ *                 "2b" (symbol rate 100, modulation index 1.0)
+ *                 "3"  (symbol rate 150, modulation index 0.5)
+ *                 "4a" (symbol rate 200, modulation index 0.5)
+ *                 "4b" (symbol rate 200, modulation index 1.0)
+ *                 "5"  (symbol rate 300, modulation index 0.5)
  *
  * if value of 255 is given then previous value is used.
  *
  * \param interface_id Network interface ID.
- * \param regulatory_domain FHSS regulatory domain default to "KR" 0x09.
- * \param operating_class FHSS operating class default to 1.
- * \param operating_mode FHSS phy operating mode default to "1b".
+ * \param regulatory_domain FHSS regulatory domain. Default to "EU" 0x03.
+ * \param operating_class FHSS operating class. Default to 2.
+ * \param operating_mode FHSS phy operating mode. Default to "3".
  *
  * \return 0, Init OK.
  * \return <0 Init fail.
@@ -158,23 +218,93 @@ int ws_management_regulatory_domain_set(
     uint8_t operating_mode);
 
 /**
+ * Get regulatory domain of Wi-SUN stack.
+ *
+ * \param interface_id Network interface ID.
+ * \param regulatory_domain FHSS regulatory domain.
+ * \param operating_class FHSS operating class.
+ * \param operating_mode FHSS phy operating mode.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_regulatory_domain_get(
+    int8_t interface_id,
+    uint8_t *regulatory_domain,
+    uint8_t *operating_class,
+    uint8_t *operating_mode);
+
+/**
+ * Validate regulatory domain of Wi-SUN stack.
+ *
+ * \param interface_id Network interface ID.
+ * \param regulatory_domain FHSS regulatory domain.
+ * \param operating_class FHSS operating class.
+ * \param operating_mode FHSS phy operating mode.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_regulatory_domain_validate(
+    int8_t interface_id,
+    uint8_t regulatory_domain,
+    uint8_t operating_class,
+    uint8_t operating_mode);
+
+/**
  * Set timing parameters related to network size.
  *
  * timing parameters follows the specification example from Wi-SUN specification
  *
- * Default value: automatic
- * small network size: hundreds of devices
- * Large network size: thousands of devices
+ * Default value: medium 100 - 800 device
+ * small network size: less than 100 devices
+ * Large network size: 800 - 1500 devices
  * automatic: when discovering the network network size is learned
  *            from advertisements and timings adjusted accordingly
  *
+ * When network size is changed, it will override following configuration values:
+ * - Timing settings set by ws_management_timing_parameters_set()
+ * - RPL settings set by ws_bbr_rpl_parameters_set()
+ *
+ * If values should be other than defaults set by stack, they need to set using
+ * above function calls after network size change.
+ *
  * \param interface_id Network interface ID.
- * \param network_size define from NETWORK_SIZE_*.
+ * \param network_size Network size in hundreds of devices, certificate or automatic.
+ *                     See NETWORK_SIZE_ definition.
  *
  * \return 0, Init OK.
  * \return <0 Init fail.
  */
 int ws_management_network_size_set(
+    int8_t interface_id,
+    uint8_t network_size);
+
+/**
+ * Get timing parameters related to network size.
+ *
+ * \param interface_id Network interface ID.
+ * \param network_size Network size in hundreds of devices, certificate or automatic.
+ *                     See NETWORK_SIZE_ definition.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_network_size_get(
+    int8_t interface_id,
+    uint8_t *network_size);
+
+/**
+ * Validate timing parameters related to network size.
+ *
+ * \param interface_id Network interface ID.
+ * \param network_size Network size in hundreds of devices, certificate or automatic.
+ *                     See NETWORK_SIZE_ definition.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_network_size_validate(
     int8_t interface_id,
     uint8_t network_size);
 
@@ -190,6 +320,32 @@ int ws_management_network_size_set(
  * \return <0 Init fail.
  */
 int ws_management_channel_mask_set(
+    int8_t interface_id,
+    uint32_t channel_mask[8]);
+
+/**
+ * Get channel mask for FHSS operation.
+ *
+ * \param interface_id Network interface ID.
+ * \param channel_mask set bits matching the channel 1 to allow channel 0 to disallow.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_channel_mask_get(
+    int8_t interface_id,
+    uint32_t *channel_mask);
+
+/**
+ * Validate channel mask for FHSS operation.
+ *
+ * \param interface_id Network interface ID.
+ * \param channel_mask set bits matching the channel 1 to allow channel 0 to disallow.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_channel_mask_validate(
     int8_t interface_id,
     uint32_t channel_mask[8]);
 
@@ -226,6 +382,7 @@ int ws_management_channel_plan_set(
  *
  * Change the default configuration for Wi-SUN FHSS operation.
  *
+ *
  * \param interface_id Network interface ID.
  * \param fhss_uc_dwell_interval default to 250 ms.
  * \param fhss_broadcast_interval default to 800 ms.
@@ -246,9 +403,10 @@ int ws_management_fhss_timing_configure(
  * Change the default configuration for Wi-SUN FHSS operation.
  * if application defined is used the behaviour is undefined
  *
+ *
  * \param interface_id Network interface ID.
  * \param channel_function Unicast channel function.
- * \param fixed_channel Used channel when channel function is fixed channel. If 0xFFFF, randomly chosen channel is used.
+ * \param fixed_channel Used channel when channel function is fixed channel.
  * \param dwell_interval Used dwell interval when channel function is TR51 or DH1.
  *
  * \return 0, Init OK.
@@ -261,14 +419,49 @@ int ws_management_fhss_unicast_channel_function_configure(
     uint8_t dwell_interval);
 
 /**
+ * Get unicast channel function.
+ *
+ * \param interface_id Network interface ID.
+ * \param channel_function Unicast channel function.
+ * \param fixed_channel Used channel when channel function is fixed channel.
+ * \param dwell_interval Used dwell interval when channel function is TR51 or DH1.
+ *
+ * \return 0, OK.
+ * \return <0 fail.
+ */
+int ws_management_fhss_unicast_channel_function_get(
+    int8_t interface_id,
+    uint8_t *channel_function,
+    uint16_t *fixed_channel,
+    uint8_t *dwell_interval);
+
+/**
+ * Validate unicast channel function.
+ *
+ * \param interface_id Network interface ID.
+ * \param channel_function Unicast channel function.
+ * \param fixed_channel Used channel when channel function is fixed channel.
+ * \param dwell_interval Used dwell interval when channel function is TR51 or DH1.
+ *
+ * \return 0, OK.
+ * \return <0 fail.
+ */
+int ws_management_fhss_unicast_channel_function_validate(
+    int8_t interface_id,
+    uint8_t channel_function,
+    uint16_t fixed_channel,
+    uint8_t dwell_interval);
+
+/**
  * Configure broadcast channel function.
  *
  * Change the default configuration for Wi-SUN FHSS operation.
  * if application defined is used the behaviour is undefined
  *
+ *
  * \param interface_id Network interface ID.
  * \param channel_function Broadcast channel function.
- * \param fixed_channel Used channel when channel function is fixed channel. If 0xFFFF, randomly chosen channel is used.
+ * \param fixed_channel Used channel when channel function is fixed channel.
  * \param dwell_interval Broadcast channel dwell interval.
  * \param broadcast_interval Broadcast interval.
  *
@@ -281,6 +474,110 @@ int ws_management_fhss_broadcast_channel_function_configure(
     uint16_t fixed_channel,
     uint8_t dwell_interval,
     uint32_t broadcast_interval);
+
+/**
+ * Get broadcast channel function.
+ *
+ * \param interface_id Network interface ID.
+ * \param channel_function Broadcast channel function.
+ * \param fixed_channel Used channel when channel function is fixed channel.
+ * \param dwell_interval Broadcast channel dwell interval.
+ * \param broadcast_interval Broadcast interval.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_fhss_broadcast_channel_function_get(
+    int8_t interface_id,
+    uint8_t *channel_function,
+    uint16_t *fixed_channel,
+    uint8_t *dwell_interval,
+    uint32_t *broadcast_interval);
+
+/**
+ * Validate broadcast channel function.
+ *
+ * \param interface_id Network interface ID.
+ * \param channel_function Broadcast channel function.
+ * \param fixed_channel Used channel when channel function is fixed channel.
+ * \param dwell_interval Broadcast channel dwell interval.
+ * \param broadcast_interval Broadcast interval.
+ *
+ * \return 0, OK.
+ * \return <0 Fail.
+ */
+int ws_management_fhss_broadcast_channel_function_validate(
+    int8_t interface_id,
+    uint8_t channel_function,
+    uint16_t fixed_channel,
+    uint8_t dwell_interval,
+    uint32_t broadcast_interval);
+
+/**
+ * Set timing parameters
+ *
+ * Sets the parameters for the PAN discovery trickle timer and PAN timeout.
+ *
+ * When network size is changed using ws_management_network_size_set(),
+ * it will override the configuration values set by this function.
+ *
+ * \param interface_id Network interface ID.
+ * \param disc_trickle_imin Discovery trickle Imin
+ * \param disc_trickle_imax Discovery trickle Imax.
+ * \param disc_trickle_k Discovery trickle k.
+ * \param pan_timeout PAN timeout.
+ *
+ * \return 0, Init OK.
+ * \return <0 Init fail.
+ */
+int ws_management_timing_parameters_set(
+    int8_t interface_id,
+    uint16_t disc_trickle_imin,
+    uint16_t disc_trickle_imax,
+    uint8_t disc_trickle_k,
+    uint16_t pan_timeout);
+
+/**
+ * Get timing parameters
+ *
+ * Gets the parameters for the PAN discovery trickle timer and PAN timeout.
+ *
+ * \param interface_id Network interface ID.
+ * \param disc_trickle_imin Discovery trickle Imin
+ * \param disc_trickle_imax Discovery trickle Imax.
+ * \param disc_trickle_k Discovery trickle k.
+ * \param pan_timeout PAN timeout.
+ *
+ * \return 0, Init OK.
+ * \return <0 Init fail.
+ */
+int ws_management_timing_parameters_get(
+    int8_t interface_id,
+    uint16_t *disc_trickle_imin,
+    uint16_t *disc_trickle_imax,
+    uint8_t *disc_trickle_k,
+    uint16_t *pan_timeout);
+
+/**
+ * Validate timing parameters
+ *
+ * Validates the parameters for the PAN discovery trickle timer and PAN timeout.
+ *
+ * \param interface_id Network interface ID.
+ * \param disc_trickle_imin Discovery trickle Imin
+ * \param disc_trickle_imax Discovery trickle Imax.
+ * \param disc_trickle_k Discovery trickle k.
+ * \param pan_timeout PAN timeout.
+ *
+ * \return 0, Init OK.
+ * \return <0 Init fail.
+ */
+int ws_management_timing_parameters_validate(
+    int8_t interface_id,
+    uint16_t disc_trickle_imin,
+    uint16_t disc_trickle_imax,
+    uint8_t disc_trickle_k,
+    uint16_t pan_timeout);
 
 /**
  * Start collecting Wi-SUN statistics.
@@ -305,6 +602,44 @@ int ws_statistics_start(
  */
 int ws_statistics_stop(
     int8_t interface_id);
+
+/**
+ * Get information from the stack state.
+ * Parent information and link qualities with stack state info
+ *
+ * \param interface_id Network interface ID.
+ * \param info_ptr Pointer to stored stack state.
+ *
+ * \return 0 Success.
+ * \return <0 Failure.
+ */
+int ws_stack_info_get(
+    int8_t interface_id,
+    ws_stack_info_t *info_ptr);
+
+/**
+ * Set minimum RF sensitivity acceptable for the parent selection
+ *
+ * Set radio signal minimum sensitivity level acceptable for parent selection.
+ * Range of -174 (0) to +80 (254) dBm.
+ *
+ * If device_min_sens is set to 0 then automatic adjustment is done by the stack.
+ *
+ * Setting a value that is not suitable for Radio might prevent the device joining to the network.
+ *
+ * NOTE: Currently lower EAPOL parents are accepted if there is no parents higher than
+ *       DEVICE_MIN_SENS + CAND_PARENT_THRESHOLD + CAND_PARENT_HYSTERESIS
+ * NOTE: Currently not using this value to limit parents as it is only RECOMENDED in specification.
+ *
+ * \param interface_id Network interface ID.
+ * \param device_min_sens value used in the parent selections.
+ *
+ * \return 0 Success.
+ * \return <0 Failure.
+ */
+int ws_device_min_sens_set(
+    int8_t interface_id,
+    uint8_t device_min_sens);
 
 #ifdef __cplusplus
 }

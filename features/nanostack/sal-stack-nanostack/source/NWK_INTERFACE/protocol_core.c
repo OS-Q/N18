@@ -83,6 +83,7 @@
 #include "Service_Libs/load_balance/load_balance_api.h"
 #include "Service_Libs/pan_blacklist/pan_blacklist_api.h"
 #include "Service_Libs/etx/etx.h"
+#include "libNET/src/net_dns_internal.h"
 
 #include "mac_api.h"
 #include "ethernet_mac_api.h"
@@ -304,6 +305,8 @@ void core_timer_event_handle(uint16_t ticksUpdate)
         ipv6_destination_cache_timer(seconds);
         ipv6_frag_timer(seconds);
         cipv6_frag_timer(seconds);
+        net_dns_timer_seconds(seconds);
+
 #ifdef HAVE_WS
         ws_pae_controller_slow_timer(seconds);
 #endif
@@ -603,6 +606,7 @@ static protocol_interface_info_entry_t *protocol_core_interface_6lowpan_entry_ge
     entry->mac_parameters->mac_prev_key_attribute_id = 0;
     entry->mac_parameters->mac_default_key_attribute_id = 1;
     entry->mac_parameters->mac_next_key_attribute_id = 2;
+    entry->mac_parameters->mac_default_key_index = 0;
 
     entry->beacon_cb = beacon_received;
 
@@ -1116,10 +1120,10 @@ void nwk_bootsrap_state_update(arm_nwk_interface_status_type_e posted_event, pro
             default:
                 mac_data_poll_protocol_poll_mode_disable(cur);
                 if (!cur->rpl_domain) {
-                    tr_debug("NON RPL Ready");
+                    tr_info("NON RPL Ready");
                     //nwk_protocol_poll_mode_disable(cur->nwk_id, 0);
                 } else {
-                    tr_debug("RPL Ready");
+                    tr_info("RPL Ready");
                 }
         }
     } else {

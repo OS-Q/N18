@@ -264,6 +264,11 @@ typedef enum {
     macAutoRequestKeyIndex = 0x7b,  /*<The index of the key used for automatic data*/
     macDefaultKeySource = 0x7c,      /*<Default key source*/
     //NON standard extension
+    macEdfeForceStop = 0xf2,          /*< Use this command for Data wait timeout at LLC: Mac stop Edfe session data wait and enable normal FHSS mode */
+    macSetDataWhitening = 0xf3,     /*< Enable or disable data whitening, boolean true for enable, false for disable */
+    macCCAThresholdStart = 0xf4,    /*< Start automatic CCA threshold */
+    mac802_15_4Mode = 0xf6,         /*<IEEE 802.15.4 mode*/
+    macDeviceDescriptionPanIDUpdate = 0xf7, /*<Thread pending link update case this will update device descrioton list pan-id to new one*/
     macTXPower = 0xf8,              /*<TX output power*/
     macCCAThreshold = 0xf9,         /*<CCA threshold*/
     macMultiCSMAParameters = 0xfa,  /*<Multi CSMA parameters*/

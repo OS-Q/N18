@@ -1,6 +1,16 @@
 {
-  "description": "Framework N18 mbed for nRF52",
-  "name": "framework-N18",
-  "url": "http://mbed.org",
-  "version": "1.0.0"
+  "name": "mbed5",
+  "version": "6.51506.201227",
+  "description": "Arm Mbed OS is a platform operating system designed for the internet of things",
+  "keywords": [
+    "framework",
+    "os",
+    "arm",
+    "hal"
+  ],
+  "homepage": "http://mbed.org",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ARMmbed/mbed-os"
+  }
 }

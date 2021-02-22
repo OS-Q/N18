@@ -53,6 +53,7 @@ static void ws_eapol_relay_socket_cb(void *cb);
 
 static const eapol_pdu_recv_cb_data_t eapol_pdu_recv_cb_data = {
     .priority = EAPOL_PDU_RECV_LOW_PRIORITY,
+    .filter_requsted = true,
     .addr_check = ws_eapol_relay_eapol_pdu_address_check,
     .receive = ws_eapol_relay_eapol_pdu_receive
 };
@@ -65,11 +66,14 @@ int8_t ws_eapol_relay_start(protocol_interface_info_entry_t *interface_ptr, uint
         return -1;
     }
 
-    if (ws_eapol_relay_get(interface_ptr)) {
+    eapol_relay_t *eapol_relay = ws_eapol_relay_get(interface_ptr);
+
+    if (eapol_relay) {
+        memcpy(&eapol_relay->remote_addr.address, remote_addr, 16);
         return 0;
     }
 
-    eapol_relay_t *eapol_relay = ns_dyn_mem_alloc(sizeof(eapol_relay_t));
+    eapol_relay = ns_dyn_mem_alloc(sizeof(eapol_relay_t));
     if (!eapol_relay) {
         return -1;
     }
@@ -183,7 +187,7 @@ static void ws_eapol_relay_socket_cb(void *cb)
     }
 
     //First 8 byte is EUID64 and rsr payload
-    if (ws_eapol_pdu_send_to_mpx(eapol_relay->interface_ptr, socket_pdu, socket_pdu + 8, cb_data->d_len - 8, socket_pdu) < 0) {
+    if (ws_eapol_pdu_send_to_mpx(eapol_relay->interface_ptr, socket_pdu, socket_pdu + 8, cb_data->d_len - 8, socket_pdu, NULL, 0) < 0) {
         ns_dyn_mem_free(socket_pdu);
     }
 }

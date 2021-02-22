@@ -30,6 +30,7 @@ struct ns_sockaddr;
 struct buffer;
 struct mac_api_s;
 
+extern uint16_t test_6lowpan_fragmentation_mtu_size_override;
 
 void mac_create_scan_request(mac_scan_type_t type, struct channel_list_s *chanlist, uint8_t scan_duration, struct mlme_scan_s *request);
 
@@ -115,11 +116,22 @@ int8_t mac_helper_link_frame_counter_read(int8_t interface_id, uint32_t *seq_ptr
 
 int8_t mac_helper_link_frame_counter_set(int8_t interface_id, uint32_t seq_ptr);
 
+int8_t mac_helper_key_link_frame_counter_read(int8_t interface_id, uint32_t *seq_ptr, uint8_t descriptor);
+
+int8_t mac_helper_key_link_frame_counter_set(int8_t interface_id, uint32_t seq_ptr, uint8_t descriptor);
+
 void mac_helper_devicetable_remove(struct mac_api_s *mac_api, uint8_t attribute_index, uint8_t *mac64);
 
-void mac_helper_device_description_write(struct protocol_interface_info_entry *cur, mlme_device_descriptor_t *device_desc, uint8_t *mac64, uint16_t mac16, uint32_t frame_counter, bool exempt);
+void mac_helper_device_description_write(struct protocol_interface_info_entry *cur, mlme_device_descriptor_t *device_desc, const uint8_t *mac64, uint16_t mac16, uint32_t frame_counter, bool exempt);
 
 void mac_helper_devicetable_set(const mlme_device_descriptor_t *device_dec, struct protocol_interface_info_entry *cur, uint8_t attribute_index, uint8_t keyID, bool force_set);
+
+void mac_helper_devicetable_direct_set(struct mac_api_s *mac_api, const mlme_device_descriptor_t *device_desc, uint8_t attribute_index);
+
 int8_t mac_helper_mac_mlme_max_retry_set(int8_t interface_id, uint8_t mac_retry_set);
+
+int8_t mac_helper_mac_device_description_pan_id_update(int8_t interface_id, uint16_t pan_id);
+
+int8_t mac_helper_start_auto_cca_threshold(int8_t interface_id, uint8_t number_of_channels, int8_t default_dbm, int8_t high_limit, int8_t low_limit);
 
 #endif // MAC_HELPER_H

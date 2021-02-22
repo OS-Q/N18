@@ -25,6 +25,7 @@
 #include "fhss_config.h"
 #include "NWK_INTERFACE/Include/protocol.h"
 #include "6LoWPAN/ws/ws_config.h"
+#include "Security/protocols/sec_prot_cfg.h"
 #include "Security/kmp/kmp_addr.h"
 #include "Security/kmp/kmp_api.h"
 #include "Security/PANA/pana_eap_header.h"
@@ -119,7 +120,16 @@ int8_t eap_tls_sec_prot_lib_message_handle(uint8_t *data, uint16_t length, bool 
             data += 4;
         }
         result = EAP_TLS_MSG_MORE_FRAG;
-    } else if (data[0] == 0) {
+    } else if (data[0] == 0 || data[0] == EAP_TLS_FRAGMENT_LENGTH) {
+        // Skip fragment length if present
+        if (data[0] & EAP_TLS_FRAGMENT_LENGTH) {
+            if (length < 5) {
+                tr_error("EAP-TLS: decode error");
+                return EAP_TLS_MSG_DECODE_ERROR;
+            }
+            length -= 4;
+            data += 4;
+        }
         // Last (or only) fragment or fragment acknowledge. If sending data
         // updates acknowledged fragments.
         if (new_seq_id && eap_tls_sec_prot_lib_ack_update(tls_send)) {
@@ -132,10 +142,15 @@ int8_t eap_tls_sec_prot_lib_message_handle(uint8_t *data, uint16_t length, bool 
     length -= 1;  // EAP-TLS flags
     data += 1;
 
+    // No further processing for EAP-TLS start
+    if (result == EAP_TLS_MSG_START) {
+        return EAP_TLS_MSG_START;
+    }
+
     // TLS data not included
     if (length == 0) {
         if (new_seq_id && result == EAP_TLS_MSG_CONTINUE) {
-            // If received only EAP-TLS header fails, and is not start,
+            // If received only EAP-TLS header fails, and is not
             // fragment acknowledge or last frame
             result = EAP_TLS_MSG_FAIL;
         }
@@ -162,7 +177,7 @@ uint8_t *eap_tls_sec_prot_lib_message_build(uint8_t eap_code, uint8_t eap_type, 
     uint8_t *data_ptr = NULL;
 
     // Write EAP-TLS data (from EAP-TLS flags field onward)
-    if (tls_send->data) {
+    if (tls_send != NULL && tls_send->data) {
         data_ptr = eap_tls_sec_prot_lib_fragment_write(tls_send->data + TLS_HEAD_LEN, tls_send->total_len, tls_send->handled_len, &eap_len, flags);
     }
 
@@ -186,8 +201,8 @@ static int8_t eap_tls_sec_prot_lib_ack_update(tls_data_t *tls)
         return false;
     }
 
-    if (tls->handled_len + TLS_FRAGMENT_LEN < tls->total_len) {
-        tls->handled_len += TLS_FRAGMENT_LEN;
+    if (tls->handled_len + EAP_TLS_FRAGMENT_LEN_VALUE < tls->total_len) {
+        tls->handled_len += EAP_TLS_FRAGMENT_LEN_VALUE;
         return false;
     }
 
@@ -221,8 +236,8 @@ static uint8_t *eap_tls_sec_prot_lib_fragment_write(uint8_t *data, uint16_t tota
         data_begin[0] = *flags;
     }
 
-    if (total_len - handled_len > TLS_FRAGMENT_LEN) {
-        *message_len += TLS_FRAGMENT_LEN;
+    if (total_len - handled_len > EAP_TLS_FRAGMENT_LEN_VALUE) {
+        *message_len += EAP_TLS_FRAGMENT_LEN_VALUE;
 
         if (handled_len == 0) {
             data_begin -= 4; // length

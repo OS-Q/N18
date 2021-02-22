@@ -57,8 +57,13 @@ uint32_t mac_read_phy_datarate(const fhss_api_t *fhss_api)
     if (!mac_setup) {
         return 0;
     }
-    uint32_t datarate = dev_get_phy_datarate(mac_setup->dev_driver->phy_driver, mac_setup->mac_channel_list.channel_page);
-    // If datarate is not set, use default 250kbit/s.
+    uint32_t datarate = 0;
+    // When channel page is set, ask data rate directly from PHY driver, otherwise use data rate configured to MAC. Ultimately, use default value instead 0.
+    if (mac_setup->mac_channel_list.channel_page != CHANNEL_PAGE_UNDEFINED) {
+        datarate = dev_get_phy_datarate(mac_setup->dev_driver->phy_driver, mac_setup->mac_channel_list.channel_page);
+    } else if (mac_setup->datarate) {
+        datarate = mac_setup->datarate;
+    }
     if (!datarate) {
         datarate = 250000;
     }
@@ -82,9 +87,16 @@ int mac_set_channel(const fhss_api_t *fhss_api, uint8_t channel_number)
     if (!mac_setup) {
         return -1;
     }
+
     if (mac_setup->mac_ack_tx_active || (mac_setup->active_pd_data_request && (mac_setup->active_pd_data_request->asynch_request || mac_setup->timer_mac_event == MAC_TIMER_ACK))) {
         return -1;
     }
+
+    //EDFE packet check if active tx or frame change session open for example wait data
+    if (mac_setup->mac_edfe_enabled && (mac_setup->mac_edfe_tx_active || mac_setup->mac_edfe_info->state > MAC_EDFE_FRAME_CONNECTING)) {
+        return -1;
+    }
+
     return mac_mlme_rf_channel_change(mac_setup, channel_number);
 }
 

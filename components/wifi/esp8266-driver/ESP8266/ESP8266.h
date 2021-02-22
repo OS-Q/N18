@@ -17,7 +17,7 @@
 #ifndef ESP8266_H
 #define ESP8266_H
 
-#if DEVICE_SERIAL && DEVICE_INTERRUPTIN && defined(MBED_CONF_EVENTS_PRESENT) && defined(MBED_CONF_NSAPI_PRESENT) && defined(MBED_CONF_RTOS_PRESENT)
+#if DEVICE_SERIAL && DEVICE_INTERRUPTIN && defined(MBED_CONF_EVENTS_PRESENT) && defined(MBED_CONF_NSAPI_PRESENT) && defined(MBED_CONF_RTOS_API_PRESENT)
 #include <stdint.h>
 
 #include "drivers/UARTSerial.h"
@@ -27,8 +27,8 @@
 #include "platform/ATCmdParser.h"
 #include "platform/Callback.h"
 #include "platform/mbed_error.h"
-#include "rtos/ConditionVariable.h"
 #include "rtos/Mutex.h"
+#include "rtos/ThisThread.h"
 
 // Various timeouts for different ESP8266 operations
 #ifndef ESP8266_CONNECT_TIMEOUT
@@ -255,10 +255,10 @@ public:
     *
     * @param id id of socket to send to
     * @param data data to be sent
-    * @param amount amount of data to be sent - max 1024
-    * @return NSAPI_ERROR_OK in success, negative error code in failure
+    * @param amount amount of data to be sent - max 2048
+    * @return number of bytes on success, negative error code in failure
     */
-    nsapi_error_t send(int id, const void *data, uint32_t amount);
+    nsapi_size_or_error_t send(int id, const void *data, uint32_t amount);
 
     /**
     * Receives datagram from an open UDP socket
@@ -405,6 +405,14 @@ public:
     static const int8_t WIFIMODE_STATION_SOFTAP = 3;
     static const int8_t SOCKET_COUNT = 5;
 
+    /**
+     * Enables or disables uart input and deep sleep
+     *
+     * @param lock if TRUE, uart input is enabled and  deep sleep is locked
+     * if FALSE, uart input is disabled and  deep sleep is unlocked
+     */
+    int uart_enable_input(bool lock);
+
 private:
     // FW version
     struct fw_sdk_version _sdk_v;
@@ -420,7 +428,6 @@ private:
     PinName _serial_rts;
     PinName _serial_cts;
     rtos::Mutex _smutex; // Protect serial port access
-    rtos::Mutex _rmutex; // Reset protection
 
     // AT Command Parser
     mbed::ATCmdParser _parser;
@@ -437,6 +444,7 @@ private:
         // data follows
     } *_packets, * *_packets_end;
     void _clear_socket_packets(int id);
+    void _clear_socket_sending(int id);
     int _sock_active_id;
 
     // Memory statistics
@@ -462,6 +470,8 @@ private:
     void _oob_tcp_data_hdlr();
     void _oob_ready();
     void _oob_scan_results();
+    void _oob_send_ok_received();
+    void _oob_send_fail_received();
 
     // OOB state variables
     int _connect_error;
@@ -471,8 +481,8 @@ private:
     bool _closed;
     bool _error;
     bool _busy;
-    rtos::ConditionVariable _reset_check;
     bool _reset_done;
+    int _sock_sending_id;
 
     // Modem's address info
     char _ip_buffer[16];
@@ -487,6 +497,7 @@ private:
         char *tcp_data;
         int32_t tcp_data_avbl; // Data waiting on modem
         int32_t tcp_data_rcvd;
+        bool send_fail;     // Received 'SEND FAIL'. Expect user will close the socket.
     };
     struct _sock_info _sock_i[SOCKET_COUNT];
 

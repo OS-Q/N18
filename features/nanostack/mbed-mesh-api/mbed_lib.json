@@ -6,6 +6,12 @@
             "help": "Nanostack's heap size [bytes: 0-‭4294967295‬]",
             "value": 32500
         },
+        "mac-neigh-table-size": {
+            "help": "Number of devices stored to the SW MAC neighbour table",
+            "value_min": 5,
+            "value_max": 255,
+            "value": 32
+        },
         "use-malloc-for-heap": {
             "help": "Use `malloc()` for reserving the Nanostack's internal heap.",
             "value": false
@@ -114,6 +120,10 @@
             "help": "default network name for wisun network",
             "value": "\"Wi-SUN Network\""
         },
+        "wisun-network-size": {
+            "help": "Expected amount of devices in the network as 100s of devices. with possible pre defined constants NETWORK_SIZE_SMALL, NETWORK_SIZE_MEDIUM, NETWORK_SIZE_LARGE, NETWORK_SIZE_XLARGE. if set to 0 Wi-SUN Certification configuration values are used. If don't define this(default null), then NETWORK_SIZE_MEDIUM will be used.",
+            "value": null
+        },
         "wisun-regulatory-domain": {
             "help": "Regulator domain.",
             "value": "3"
@@ -154,21 +164,61 @@
             "help": "Unicast dwell interval. Range: 15-255 milliseconds",
             "value": 0
         },
+        "wisun-device-type": {
+            "help": "Supported device operating modes: MESH_DEVICE_TYPE_WISUN_ROUTER, MESH_DEVICE_TYPE_WISUN_BORDER_ROUTER",
+            "value": "MESH_DEVICE_TYPE_WISUN_ROUTER"
+        },
         "certificate-header": {
             "help": "File name of the certificate header file (used on include directive)",
             "value": null
         },
         "root-certificate": {
-            "help": "Root certificate in PEM format (must be a null terminated c-string)",
+            "help": "Root certificate; in PEM format must be a null terminated c-string, in DER format the root-certificate-len must be set",
             "value": null
         },
+        "root-certificate-len": {
+            "help": "Root certificate length; optional for PEM format, must be defined for DER format",
+            "value": null
+        },        
         "own-certificate": {
-            "help": "Own certificate in PEM format (must be a null terminated c-string)",
+            "help": "Own certificate; in PEM format must be a null terminated c-string, in DER format the own-certificate-len must be set",
+            "value": null
+        },
+        "own-certificate-len": {
+            "help": "Own certificate length; optional for PEM format, must be defined for DER format",
             "value": null
         },
         "own-certificate-key": {
-            "help": "Own certificate's key in PEM format (must be a null terminated c-string)",
+            "help": "Own certificate's key; in PEM format must be a null terminated c-string, in DER format the own-certificate-key-len must be set",
             "value": null
+        },
+        "own-certificate-key-len": {
+            "help": "Own certificate's key length; optional for PEM format, must be defined for DER format",
+            "value": null
+        },
+        "radius-server-ipv6-address": {
+            "help": "RADIUS Server IPv6 address in string format (e.g. \"2001:1234::1\")",
+            "value": null
+        },
+        "radius-shared-secret": {
+            "help": "RADIUS shared secret; ASCII string (e.g. \"radiuspassword\") or sequence of bytes (e.g. 0x01, 0x02, 0x03, 0x04, 0x05)",
+            "value": null
+        },
+        "radius-shared-secret-len": {
+            "help": "RADIUS shared secret length; If length is not defined, strlen() is used to determine RADIUS shared secret length",
+            "value": null
+        },
+        "radius-retry-imin": {
+            "help": "RADIUS retry trickle timer Imin; in 100ms units; range 1-1200; default 20 (2 seconds)",
+            "value": 20
+        },
+        "radius-retry-imax": {
+            "help": "RADIUS retry trickle timer Imax; in 100ms units; range 1-1200; default 30 (3 seconds)",
+            "value": 30
+        },
+        "radius-retry-count": {
+            "help": "RADIUS retry trickle count; default 3",
+            "value": 3
         }
     },
     "target_overrides": {

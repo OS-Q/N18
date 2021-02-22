@@ -20,7 +20,18 @@
 
 #ifdef HAVE_WS
 
+typedef enum {
+    AUTH_RESULT_OK = 0,                    // Successful
+    AUTH_RESULT_ERR_NO_MEM = -1,           // No memory
+    AUTH_RESULT_ERR_TX_NO_ACK = -2,        // No acknowledge was received
+    AUTH_RESULT_ERR_UNSPEC = -3            // Other reason
+} auth_result_e;
+
 struct nvm_tlv_entry;
+struct ws_sec_timer_cfg_s;
+struct ws_sec_prot_cfg_s;
+struct bbr_radius_timing;
+
 /**
  * ws_pae_controller_set_target sets EAPOL target for PAE supplicant
  *
@@ -82,6 +93,19 @@ int8_t ws_pae_controller_authenticator_start(protocol_interface_info_entry_t *in
 int8_t ws_pae_controller_init(protocol_interface_info_entry_t *interface_ptr);
 
 /**
+ * ws_pae_controller_config_set sets PAE controller configuration
+ *
+ * \param interface_ptr interface
+ * \param sec_timer_cfg timer configuration or NULL if not set
+ * \param sec_prot_cfg protocol configuration or NULL if not set
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_configure(protocol_interface_info_entry_t *interface_ptr, struct ws_sec_timer_cfg_s *sec_timer_cfg, struct ws_sec_prot_cfg_s *sec_prot_cfg);
+
+/**
  * ws_pae_controller_init initializes PAE supplicant
  *
  * \param interface_ptr interface
@@ -124,28 +148,6 @@ int8_t ws_pae_controller_stop(protocol_interface_info_entry_t *interface_ptr);
  *
  */
 int8_t ws_pae_controller_delete(protocol_interface_info_entry_t *interface_ptr);
-
-/**
- * ws_pae_controller_timing_adjust Adjust retries and timings of the security protocols
- *
- * Timing value is a generic number between 0 to 32 that goes from fast and
- * reactive network to low bandwidth and long latency.
- *
- * example value definitions:
- * 0-8 very fast network
- * 9-16 medium network
- * 16-24 slow network
- * 25-32 extremely slow network
- *
- * There is no need to have lots variations in every layer if protocol is not very active in any case.
- *
- * \param timing Timing value.
- *
- * \return < 0 failure
- * \return >= 0 success
- *
- */
-int8_t ws_pae_controller_timing_adjust(uint8_t timing);
 
 /**
  * ws_pae_controller_certificate_chain_set set certificate chain
@@ -232,28 +234,116 @@ int8_t ws_pae_controller_certificate_revocation_list_add(const arm_cert_revocati
 int8_t ws_pae_controller_certificate_revocation_list_remove(const arm_cert_revocation_list_entry_s *crl);
 
 /**
+ * ws_pae_controller_radius_address_set set radius address
+ *
+ * \param interface_id interface identifier
+ * \param address address
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_address_set(int8_t interface_id, const uint8_t *address);
+
+/**
+ * ws_pae_controller_radius_address_set get radius address
+ *
+ * \param interface_id interface identifier
+ * \param address address buffer where to write address, must have space at least for 39 characters and NUL terminator
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_address_get(int8_t interface_id, uint8_t *address);
+
+/**
+ * ws_pae_controller_radius_shared_secret_set set radius shared secret
+ *
+ * \param interface_id interface identifier
+ * \param shared_secret_len shared secret length
+ * \param shared_secret shared secret
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_shared_secret_set(int8_t interface_id, const uint16_t shared_secret_len, const uint8_t *shared_secret);
+
+/**
+ * ws_pae_controller_radius_shared_secret_get get radius shared secret
+ *
+ * \param interface_id interface identifier
+ * \param shared_secret_len On call, shared secret buffer length, on return shared secret length
+ * \param shared_secret shared secret
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_shared_secret_get(int8_t interface_id, uint16_t *shared_secret_len, uint8_t *shared_secret);
+
+/**
+ * ws_pae_controller_radius_timing_set set radius timing information
+ *
+ * \param interface_id interface identifier
+ * \param timing timing information
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_timing_set(int8_t interface_id, struct bbr_radius_timing *timing);
+
+/**
+ * ws_pae_controller_radius_timing_get get radius timing information
+ *
+ * \param interface_id interface identifier
+ * \param timing timing information
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_timing_get(int8_t interface_id, struct bbr_radius_timing *timing);
+
+/**
+ * ws_pae_controller_radius_timing_validate validate radius timing information
+ *
+ * \param interface_id interface identifier
+ * \param timing timing information
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_radius_timing_validate(int8_t interface_id, struct bbr_radius_timing *timing);
+
+/**
  * ws_pae_controller_nw_info_set set network information
  *
  * \param interface_ptr interface
  * \param pan_id PAD ID
+ * \param pan_version PAN version
  * \param network_name network name
  *
  * \return < 0 failure
  * \return >= 0 success
  *
  */
-int8_t ws_pae_controller_nw_info_set(protocol_interface_info_entry_t *interface_ptr, uint16_t pan_id, char *network_name);
+int8_t ws_pae_controller_nw_info_set(protocol_interface_info_entry_t *interface_ptr, uint16_t pan_id, uint16_t pan_version, char *network_name);
 
 /**
  * ws_pae_controller_nw_key_valid network key is valid i.e. used successfully on bootstrap
  *
  * \param interface_ptr interface
+ * \param br_iid border router IID for which the keys are valid
  *
  * \return < 0 failure
  * \return >= 0 success
  *
  */
-int8_t ws_pae_controller_nw_key_valid(protocol_interface_info_entry_t *interface_ptr);
+int8_t ws_pae_controller_nw_key_valid(protocol_interface_info_entry_t *interface_ptr, uint8_t *br_iid);
 
 /**
  * ws_pae_controller_border_router_addr_write write border router address
@@ -277,7 +367,7 @@ int8_t ws_pae_controller_border_router_addr_write(protocol_interface_info_entry_
  * \return >= 0 success
  *
  */
-int8_t ws_pae_controller_border_router_addr_read(protocol_interface_info_entry_t *interface_ptr, uint8_t *eui_64);
+int8_t ws_pae_controller_border_router_addr_read(protocol_interface_info_entry_t *interface_ptr, uint8_t *iid);
 
 /**
  * ws_pae_controller_gtk_update update GTKs (test interface)
@@ -467,9 +557,10 @@ typedef void ws_pae_controller_nw_send_key_index_set(protocol_interface_info_ent
  *
  * \param interface_ptr interface
  * \param counter frame counter
+ * \param slot key slot (MAC key descriptor), from 0 to 4
  *
  */
-typedef void ws_pae_controller_nw_frame_counter_set(protocol_interface_info_entry_t *interface_ptr, uint32_t counter);
+typedef void ws_pae_controller_nw_frame_counter_set(protocol_interface_info_entry_t *interface_ptr, uint32_t counter, uint8_t slot);
 
 /**
  * ws_pae_controller_nw_frame_counter_read network frame counter read callback
@@ -478,16 +569,29 @@ typedef void ws_pae_controller_nw_frame_counter_set(protocol_interface_info_entr
  * \param counter frame counter
  *
  */
-typedef void ws_pae_controller_nw_frame_counter_read(protocol_interface_info_entry_t *interface_ptr, uint32_t *counter);
+typedef void ws_pae_controller_nw_frame_counter_read(protocol_interface_info_entry_t *interface_ptr, uint32_t *counter, uint8_t slot);
 
 /**
  * ws_pae_controller_auth_completed authentication completed callback
  *
  * \param interface_ptr interface
- * \param success true if authentication was successful
+ * \param result result, either ok or failure reason
+ * \param target_eui_64 EAPOL target in case of failure or NULL
  *
  */
-typedef void ws_pae_controller_auth_completed(protocol_interface_info_entry_t *interface_ptr, bool success);
+typedef void ws_pae_controller_auth_completed(protocol_interface_info_entry_t *interface_ptr, auth_result_e result, uint8_t *target_eui_64);
+
+/**
+ * ws_pae_controller_auth_next_target get next target to attempt authentication
+ *
+ * \param interface_ptr interface
+ * \param previous_eui_64 EUI-64 of previous target
+ * \param pan_id pan id
+ *
+ * \return EUI-64 of the next target or previous target if new one not available
+ *
+ */
+typedef const uint8_t *ws_pae_controller_auth_next_target(protocol_interface_info_entry_t *interface_ptr, const uint8_t *previous_eui_64, uint16_t *pan_id);
 
 /**
  * ws_pae_controller_pan_ver_increment PAN version increment callback
@@ -498,22 +602,59 @@ typedef void ws_pae_controller_auth_completed(protocol_interface_info_entry_t *i
 typedef void ws_pae_controller_pan_ver_increment(protocol_interface_info_entry_t *interface_ptr);
 
 /**
- * ws_pae_controller_cb_register register PEA controller callbacks
+ * ws_pae_controller_nw_info_updated network information is updated (read from memory)
+ *
+ * \param interface_ptr interface
+ * \param pan_id PAN ID
+ * \param pan_version PAN version
+ * \param network_name network name
+ *
+ */
+typedef void ws_pae_controller_nw_info_updated(protocol_interface_info_entry_t *interface_ptr, uint16_t pan_id, uint16_t pan_version, char *network_name);
+
+/**
+ * ws_pae_controller_cb_register register controller callbacks
  *
  * \param interface_ptr interface
  * \param completed authentication completed callback
+ * \param next_target authentication next target callback
  * \param nw_key_set network key set callback
  * \param nw_key_clear network key clear callback
  * \param nw_send_key_index_set network send key index set callback
  * \param nw_frame_counter_set network frame counter set callback
  * \param nw_frame_counter_read network frame counter read callback
  * \param pan_ver_increment PAN version increment callback
+ * \param nw_info_updated network information updated callback
  *
  * \return < 0 failure
  * \return >= 0 success
  *
  */
-int8_t ws_pae_controller_cb_register(protocol_interface_info_entry_t *interface_ptr, ws_pae_controller_auth_completed *completed, ws_pae_controller_nw_key_set *nw_key_set, ws_pae_controller_nw_key_clear *nw_key_clear, ws_pae_controller_nw_send_key_index_set *nw_send_key_index_set, ws_pae_controller_nw_frame_counter_set *nw_frame_counter_set, ws_pae_controller_nw_frame_counter_read *nw_frame_counter_read, ws_pae_controller_pan_ver_increment *pan_ver_increment);
+int8_t ws_pae_controller_cb_register(protocol_interface_info_entry_t *interface_ptr, ws_pae_controller_auth_completed *completed, ws_pae_controller_auth_next_target *auth_next_target, ws_pae_controller_nw_key_set *nw_key_set, ws_pae_controller_nw_key_clear *nw_key_clear, ws_pae_controller_nw_send_key_index_set *nw_send_key_index_set, ws_pae_controller_nw_frame_counter_set *nw_frame_counter_set, ws_pae_controller_nw_frame_counter_read *nw_frame_counter_read, ws_pae_controller_pan_ver_increment *pan_ver_increment, ws_pae_controller_nw_info_updated *nw_info_updated);
+
+/**
+ * ws_pae_controller_ip_addr_get gets IP addressing information
+ *
+ * \param interface_ptr interface
+ * \param address IP address
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+typedef int8_t ws_pae_controller_ip_addr_get(protocol_interface_info_entry_t *interface_ptr, uint8_t *address);
+
+/**
+ * ws_pae_controller_auth_cb_register register authenticator callbacks
+ *
+ * \param interface_ptr interface
+ * \param ip_addr_get IP address get callback
+ *
+ * \return < 0 failure
+ * \return >= 0 success
+ *
+ */
+int8_t ws_pae_controller_auth_cb_register(protocol_interface_info_entry_t *interface_ptr, ws_pae_controller_ip_addr_get *ip_addr_get);
 
 /**
  * ws_pae_controller_fast_timer PAE controller fast timer call
@@ -531,7 +672,7 @@ void ws_pae_controller_fast_timer(uint16_t ticks);
  */
 void ws_pae_controller_slow_timer(uint16_t seconds);
 
-struct nvm_tlv_entry *ws_pae_controller_nvm_tlv_get(protocol_interface_info_entry_t *interface_ptr);
+struct nvm_tlv *ws_pae_controller_nvm_tlv_get(protocol_interface_info_entry_t *interface_ptr);
 
 /**
  * ws_pae_controller_forced_gc PAE controller garbage cleanup callback

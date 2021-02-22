@@ -124,6 +124,7 @@ typedef struct buffer_options {
     bool    need_predecessor: 1;        /*!< Used as an indicator that predecessor address needed */
     bool    multicast_loop: 1;          /*!< We want loopback if we're a group member (TX), or this IS the loopback if RX */
     bool    mpl_permitted: 1;           /*!< MPL will be used if enabled on interface and scope >=3 */
+    bool    edfe_mode: 1;               /*!< Use Extended Directed Frame Exchange pattern in MAC layer */
 #ifndef NO_IP_FRAGMENT_TX
     bool    ipv6_dontfrag: 1;           /*!< Don't IPv6 fragment (RFC 3542) */
 #endif
@@ -322,7 +323,7 @@ struct socket *buffer_socket_set(buffer_t *buf, struct socket *socket);
         } while(0)
 
 /** get data length*/
-#define buffer_data_length(x)  (int16_t)(x->buf_end - x->buf_ptr)
+#define buffer_data_length(x)  (int)(x->buf_end - x->buf_ptr)
 
 /** get data length Set*/
 #define buffer_data_length_set(x,z)  ((x)->buf_end = (x)->buf_ptr + (z))

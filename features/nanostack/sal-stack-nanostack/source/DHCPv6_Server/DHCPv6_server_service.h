@@ -45,6 +45,7 @@ int DHCPv6_server_service_init(int8_t interface, uint8_t guaPrefix[static 16], u
 
 void DHCPv6_server_service_callback_set(int8_t interface, uint8_t guaPrefix[static 16], dhcp_address_prefer_remove_cb *remove_cb, dhcp_address_add_notify_cb *add_cb);
 
+int DHCPv6_server_service_duid_update(int8_t interface, uint8_t guaPrefix[static 16],  uint8_t *duid_ptr, uint16_t duid_type, uint8_t duid_length);
 
 /* Delete dhcp thread dhcp router ID server.
  *
@@ -65,8 +66,9 @@ void DHCPv6_server_service_timeout_cb(uint32_t timeUpdateInSeconds);
  *  /param interface interface id of this thread instance.
  *  /param guaPrefix Prefix which will be removed
  *  /param mode true trig autonous mode, false define address by default suffics + client id
+ *  /param autonomous_skip_list true skip address list allocation when autonous mode is selected
  */
-int DHCPv6_server_service_set_address_autonous_flag(int8_t interface, uint8_t guaPrefix[static 16], bool mode);
+int DHCPv6_server_service_set_address_autonous_flag(int8_t interface, uint8_t guaPrefix[static 16], bool mode, bool autonomous_skip_list);
 
 
 /* SET max accepted clients to server, Default is 200
@@ -87,6 +89,11 @@ int DHCPv6_server_service_set_max_clients_accepts_count(int8_t interface, uint8_
  *  /param validLifeTimne in seconds
  */
 int DHCPv6_server_service_set_address_validlifetime(int8_t interface, uint8_t guaPrefix[static 16], uint32_t validLifeTimne);
+
+int DHCPv6_server_service_set_dns_server(int8_t interface, uint8_t guaPrefix[static 16], uint8_t dns_server_address[static 16], uint8_t *dns_search_list_ptr, uint8_t dns_search_list_len);
+
+int DHCPv6_server_service_set_vendor_data(int8_t interface, uint8_t guaPrefix[static 16], uint32_t enterprise_number, uint8_t *dhcp_vendor_data_ptr, uint8_t dhcp_vendor_data_len);
+
 #else
 #define DHCPv6_server_service_delete(interface, guaPrefix, delete_gua_addresses)
 #endif

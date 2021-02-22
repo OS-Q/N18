@@ -1,24 +1,9 @@
-# Copyright 2019-present PlatformIO <contact@platformio.org>
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
 import json
 import sys
 import os
 
 from os.path import (abspath, basename, isfile, join, relpath,
-                     normpath)
+                    normpath)
 
 from tools.build_api import prepare_toolchain, UPDATE_WHITELIST
 
@@ -42,15 +27,15 @@ def get_notifier():
 
 class PlatformioMbedAdapter(object):
     def __init__(self,
-                 src_paths,
-                 build_path,
-                 target,
-                 framework_path,
-                 app_config=None,
-                 build_profile=BUILD_PROFILE,
-                 custom_target_path=None,
-                 toolchain_name=TOOLCHAIN_NAME,
-                 ignore_dirs=None):
+                src_paths,
+                build_path,
+                target,
+                framework_path,
+                app_config=None,
+                build_profile=BUILD_PROFILE,
+                custom_target_path=None,
+                toolchain_name=TOOLCHAIN_NAME,
+                ignore_dirs=None):
         self.src_paths = src_paths
         self.build_path = build_path
         self.target = target
@@ -80,7 +65,7 @@ class PlatformioMbedAdapter(object):
         target_info = TARGET_MAP.get(self.target, "")
         if not target_info:
             sys.stderr.write(
-                "Failed to extract info for %s target\n", self.target)
+                "Failed to extract info for %s target\n" % self.target)
             sys.exit(1)
 
         return target_info
@@ -101,7 +86,7 @@ class PlatformioMbedAdapter(object):
 
             result.append(s)
 
-        # Symbols need to be sorted to aboid recompilation
+        # Symbols need to be sorted to avoid recompilation
         result.sort()
         return result
 
@@ -214,7 +199,7 @@ class PlatformioMbedAdapter(object):
             "inc_dirs": self.resources.inc_dirs,
             "ldscript": [self.resources.linker_script],
             "objs": self.resources.objects,
-            "build_flags": self.toolchain.flags,
+            "build_flags": {k: sorted(v) for k, v in self.toolchain.flags.items()},
             "libs": [basename(l) for l in self.resources.libraries],
             "lib_paths": self.resources.lib_dirs,
             "syslibs": self.toolchain.sys_libs,

@@ -35,6 +35,7 @@ struct arm_phy_sap_msg_s;
 struct mcps_purge_s;
 struct mcps_data_req_ie_list;
 struct channel_list_s;
+struct mcps_enhanced_frame_response_s;
 
 /** Address types */
 typedef enum {
@@ -56,6 +57,7 @@ typedef enum {
 #define MAC_MLME_SCAN_CONFIRM_HANDLER   6
 #define MAC_SAP_TRIG_TX                 7
 #define MCPS_SAP_DATA_ACK_CNF_EVENT     8
+#define MAC_CCA_THR_UPDATE              9
 
 // Default number of CSMA-CA periods
 #define MAC_DEFAULT_NUMBER_OF_CSMA_PERIODS  1
@@ -132,7 +134,11 @@ uint8_t mcps_sap_purge_reg_handler(struct protocol_interface_rf_mac_setup *rf_ma
 
 int8_t mcps_pd_data_rebuild(struct protocol_interface_rf_mac_setup *rf_ptr, mac_pre_build_frame_t *buffer);
 
+int8_t mcps_edfe_data_request(struct protocol_interface_rf_mac_setup *rf_ptr, mac_pre_build_frame_t *buffer);
+
 int8_t mcps_generic_ack_data_request_init(struct protocol_interface_rf_mac_setup *rf_ptr, const mac_fcf_sequence_t *fcf, const uint8_t *data_ptr, const mcps_ack_data_payload_t *ack_payload);
+
+int8_t mcps_generic_edfe_frame_init(struct protocol_interface_rf_mac_setup *rf_ptr, const mac_fcf_sequence_t *fcf, const uint8_t *data_ptr, const struct mcps_edfe_response_s *response);
 
 int8_t mcps_generic_ack_build(struct protocol_interface_rf_mac_setup *rf_ptr, bool init_build);
 
@@ -141,5 +147,7 @@ int mcps_packet_ingress_rate_limit_by_memory(uint8_t free_heap_percentage);
 uint32_t mac_mcps_sap_get_phy_timestamp(struct protocol_interface_rf_mac_setup *rf_mac_setup);
 
 void mcps_pending_packet_counter_update_check(struct protocol_interface_rf_mac_setup *rf_mac_setup, mac_pre_build_frame_t *buffer);
+
+void mac_cca_threshold_event_send(struct protocol_interface_rf_mac_setup *rf_mac_setup, uint8_t channel, int16_t dbm);
 
 #endif /* MAC_IEEE802_15_4_MAC_MCPS_SAP_H_ */

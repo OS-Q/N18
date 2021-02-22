@@ -31,6 +31,9 @@
 #include "mac_fhss_callbacks.h"
 #include "eventOS_callback_timer.h"
 #include "common_functions.h"
+#include "ns_trace.h"
+
+#define TRACE_GROUP "swm"
 
 //TODO: create linked list of created MACs
 
@@ -51,6 +54,7 @@ static int8_t ns_sw_mac_initialize(mac_api_t *api, mcps_data_confirm *mcps_data_
                                    mcps_data_indication *mcps_data_ind_cb, mcps_purge_confirm *purge_conf_cb,
                                    mlme_confirm *mlme_conf_callback, mlme_indication *mlme_ind_callback, int8_t parent_id);
 static int8_t ns_sw_mac_api_enable_mcps_ext(mac_api_t *api, mcps_data_indication_ext *data_ind_cb, mcps_data_confirm_ext *data_cnf_cb, mcps_ack_data_req_ext *ack_data_req_cb);
+static int8_t ns_sw_mac_api_enable_edfe_ext(mac_api_t *api, mcps_edfe_handler *edfe_ind_cb);
 
 static void mlme_req(const mac_api_t *api, mlme_primitive id, const void *data);
 static void mcps_req(const mac_api_t *api, const mcps_data_req_t *data);
@@ -63,6 +67,7 @@ static int8_t sw_mac_net_phy_rx(const uint8_t *data_ptr, uint16_t data_len, uint
 static int8_t sw_mac_net_phy_tx_done(int8_t driver_id, uint8_t tx_handle, phy_link_tx_status_e status, uint8_t cca_retry, uint8_t tx_retry);
 static int8_t sw_mac_net_phy_config_parser(int8_t driver_id, const uint8_t *data, uint16_t length);
 static int8_t sw_mac_storage_decription_sizes_get(const mac_api_t *api, mac_description_storage_size_t *buffer);
+
 
 static int8_t sw_mac_storage_decription_sizes_get(const mac_api_t *api, mac_description_storage_size_t *buffer)
 {
@@ -96,12 +101,27 @@ mac_api_t *ns_sw_mac_create(int8_t rf_driver_id, mac_description_storage_size_t 
     memset(this, 0, sizeof(mac_api_t));
     this->parent_id = -1;
     mac_store.dev_driver = driver;
-    mac_store.setup = mac_mlme_data_base_allocate(mac_store.dev_driver->phy_driver->PHY_MAC, mac_store.dev_driver, storage_sizes);
+
+    // Set default MTU size to 127 unless it is too much for PHY driver
+    if (driver->phy_driver->phy_MTU > MAC_IEEE_802_15_4_MAX_PHY_PACKET_SIZE) {
+        this->phyMTU = MAC_IEEE_802_15_4_MAX_PHY_PACKET_SIZE;
+    } else {
+        this->phyMTU = driver->phy_driver->phy_MTU;
+    }
+
+    mac_store.setup = mac_mlme_data_base_allocate(mac_store.dev_driver->phy_driver->PHY_MAC, mac_store.dev_driver, storage_sizes, this->phyMTU);
 
     if (!mac_store.setup) {
         ns_dyn_mem_free(this);
         return NULL;
     }
+
+    // Set MAC mode to PHY driver
+    mac_store.setup->current_mac_mode = IEEE_802_15_4_2011;
+    if (mac_store.setup->dev_driver->phy_driver->extension) {
+        mac_store.setup->dev_driver->phy_driver->extension(PHY_EXTENSION_SET_802_15_4_MODE, (uint8_t *) &mac_store.setup->current_mac_mode);
+    }
+    tr_debug("Set MAC mode to %s, MTU size: %u", "IEEE 802.15.4-2011", mac_store.setup->phy_mtu_size);
 
     arm_net_phy_init(driver->phy_driver, &sw_mac_net_phy_rx, &sw_mac_net_phy_tx_done);
     arm_net_virtual_config_rx_cb_set(driver->phy_driver, &sw_mac_net_phy_config_parser);
@@ -109,6 +129,7 @@ mac_api_t *ns_sw_mac_create(int8_t rf_driver_id, mac_description_storage_size_t 
 
     this->mac_initialize = &ns_sw_mac_initialize;
     this->mac_mcps_extension_enable = &ns_sw_mac_api_enable_mcps_ext;
+    this->mac_mcps_edfe_enable = &ns_sw_mac_api_enable_edfe_ext;
     this->mlme_req = &mlme_req;
     this->mcps_data_req = &mcps_req;
     this->mcps_data_req_ext = &mcps_req_ext;
@@ -116,10 +137,8 @@ mac_api_t *ns_sw_mac_create(int8_t rf_driver_id, mac_description_storage_size_t 
     this->mac64_get = &macext_mac64_address_get;
     this->mac64_set = &macext_mac64_address_set;
     this->mac_storage_sizes_get = &sw_mac_storage_decription_sizes_get;
-    this->phyMTU = driver->phy_driver->phy_MTU;
 
     mac_store.mac_api = this;
-
     mac_store.virtual_driver = NULL;
     return this;
 }
@@ -197,6 +216,20 @@ int ns_sw_mac_fhss_register(mac_api_t *mac_api, fhss_api_t *fhss_api)
     return 0;
 }
 
+int ns_sw_mac_fhss_unregister(mac_api_t *mac_api)
+{
+    if (!mac_api) {
+        return -1;
+    }
+    // Get a pointer to MAC setup structure
+    protocol_interface_rf_mac_setup_s *mac_setup = get_sw_mac_ptr_by_mac_api(mac_api);
+    if (!mac_setup) {
+        return -1;
+    }
+    mac_setup->fhss_api = NULL;
+    return 0;
+}
+
 struct fhss_api *ns_sw_mac_get_fhss_api(struct mac_api_s *mac_api)
 {
     if (!mac_api) {
@@ -265,8 +298,8 @@ static int8_t ns_sw_mac_api_enable_mcps_ext(mac_api_t *api, mcps_data_indication
         ns_dyn_mem_free(mac_store.setup->dev_driver_tx_buffer.enhanced_ack_buf);
 
         uint16_t total_length;
-        if (ENHANCED_ACK_MAX_LENGTH > dev_driver->phy_driver->phy_MTU) {
-            total_length = dev_driver->phy_driver->phy_MTU;
+        if (ENHANCED_ACK_MAX_LENGTH > mac_store.setup->phy_mtu_size) {
+            total_length = mac_store.setup->phy_mtu_size;
         } else {
             total_length = ENHANCED_ACK_MAX_LENGTH;
         }
@@ -280,6 +313,33 @@ static int8_t ns_sw_mac_api_enable_mcps_ext(mac_api_t *api, mcps_data_indication
         mac_store.setup->mac_extension_enabled = true;
     } else {
         mac_store.setup->mac_extension_enabled = false;
+    }
+    return 0;
+}
+
+static int8_t ns_sw_mac_api_enable_edfe_ext(mac_api_t *api, mcps_edfe_handler *edfe_ind_cb)
+{
+    //TODO: Find from linked list instead
+    if (api != mac_store.mac_api) {
+        return -1;
+    }
+
+    mac_api_t *cur = mac_store.mac_api;
+
+    if (!mac_store.setup->mac_extension_enabled) {
+        return -1;
+    }
+    cur->edfe_ind_cb = edfe_ind_cb;
+    if (edfe_ind_cb) {
+        ns_dyn_mem_free(mac_store.setup->mac_edfe_info);
+        mac_store.setup->mac_edfe_info = ns_dyn_mem_alloc(sizeof(mac_mcps_edfe_frame_info_t));
+        if (!mac_store.setup->mac_edfe_info) {
+            return -2;
+        }
+        mac_store.setup->mac_edfe_info->state = MAC_EDFE_FRAME_IDLE;
+        mac_store.setup->mac_edfe_enabled = true;
+    } else {
+        mac_store.setup->mac_edfe_enabled = false;
     }
     return 0;
 }

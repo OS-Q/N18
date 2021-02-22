@@ -175,18 +175,22 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_get_ip_address)
     ATHandler at(&fh1, que, 0, ",");
 
     MyStack st(at, 0, IPV6_STACK);
-    EXPECT_TRUE(st.get_ip_address() == NULL);
+    SocketAddress a;
+    EXPECT_EQ(st.get_ip_address(&a), NSAPI_ERROR_NO_ADDRESS);
+    EXPECT_EQ(a.get_ip_address(), nullptr);
 
-    char table[] = "1.2.3.4.5.65.7.8.9.10.11\0";
+    char table[] = "1.2.3.4";
     ATHandler_stub::ssize_value = -1;
     ATHandler_stub::bool_value = true;
     ATHandler_stub::read_string_value = table;
-    EXPECT_TRUE(st.get_ip_address() == NULL);
+    EXPECT_EQ(st.get_ip_address(&a), NSAPI_ERROR_NO_ADDRESS);
+    EXPECT_EQ(a.get_ip_address(), nullptr);
 
     ATHandler_stub::ssize_value = strlen(table);
     ATHandler_stub::bool_value = true;
     ATHandler_stub::read_string_value = table;
-    EXPECT_TRUE(st.get_ip_address());
+    EXPECT_EQ(st.get_ip_address(&a), NSAPI_ERROR_OK);
+    EXPECT_EQ(strcmp(a.get_ip_address(), "1.2.3.4"), 0);
 }
 
 TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_open)
@@ -244,7 +248,7 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_bind)
     MyStack st(at, 0, IPV6_STACK);
     SocketAddress addr;
     ATHandler_stub::nsapi_error_value = NSAPI_ERROR_ALREADY;
-    EXPECT_EQ(st.socket_bind(NULL, addr), NSAPI_ERROR_DEVICE_ERROR);
+    EXPECT_EQ(st.socket_bind(NULL, addr), NSAPI_ERROR_NO_SOCKET);
 
     EXPECT_EQ(st.socket_bind(&st.socket, addr), NSAPI_ERROR_ALREADY);
 }
@@ -267,7 +271,7 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_connect)
 
     MyStack st(at, 0, IPV6_STACK);
     SocketAddress addr;
-    EXPECT_EQ(st.socket_connect(NULL, addr), NSAPI_ERROR_DEVICE_ERROR);
+    EXPECT_EQ(st.socket_connect(NULL, addr), NSAPI_ERROR_NO_SOCKET);
 
     EXPECT_EQ(st.socket_connect(&st.socket, addr), NSAPI_ERROR_OK);
 }
@@ -290,11 +294,11 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_send)
     ATHandler at(&fh1, que, 0, ",");
 
     MyStack st(at, 0, IPV6_STACK);
-    EXPECT_EQ(st.socket_send(NULL, "addr", 4), NSAPI_ERROR_DEVICE_ERROR);
+    EXPECT_EQ(st.socket_send(NULL, "addr", 4), NSAPI_ERROR_NO_SOCKET);
 
-    EXPECT_EQ(st.socket_send(&st.socket, "addr", 4), NSAPI_ERROR_DEVICE_ERROR);
+    EXPECT_EQ(st.socket_send(&st.socket, "addr", 4), NSAPI_ERROR_NO_CONNECTION);
 
-    SocketAddress addr;
+    SocketAddress addr("fc00::", 123);
     st.max_sock_value = 1;
     st.bool_value = true;
     nsapi_socket_t sock = &st.socket;
@@ -311,8 +315,8 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_sendto)
 
     MyStack st(at, 0, IPV6_STACK);
 
-    SocketAddress addr;
-    EXPECT_EQ(st.socket_sendto(NULL, addr, "addr", 4), NSAPI_ERROR_DEVICE_ERROR);
+    SocketAddress addr("fc00::", 123);
+    EXPECT_EQ(st.socket_sendto(NULL, addr, "addr", 4), NSAPI_ERROR_NO_SOCKET);
 
     st.max_sock_value = 1;
     st.bool_value = true;
@@ -334,7 +338,7 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_recv)
 
     MyStack st(at, 0, IPV6_STACK);
     char table[4];
-    EXPECT_EQ(st.socket_recv(NULL, table, 4), NSAPI_ERROR_DEVICE_ERROR);
+    EXPECT_EQ(st.socket_recv(NULL, table, 4), NSAPI_ERROR_NO_SOCKET);
 }
 
 TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_recvfrom)
@@ -345,7 +349,7 @@ TEST_F(TestAT_CellularStack, test_AT_CellularStack_socket_recvfrom)
 
     MyStack st(at, 0, IPV6_STACK);
     char table[4];
-    EXPECT_EQ(st.socket_recvfrom(NULL, NULL, table, 4), NSAPI_ERROR_DEVICE_ERROR);
+    EXPECT_EQ(st.socket_recvfrom(NULL, NULL, table, 4), NSAPI_ERROR_NO_SOCKET);
 
     SocketAddress addr;
     st.max_sock_value = 1;

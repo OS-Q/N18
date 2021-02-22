@@ -24,6 +24,7 @@
 #include "fhss_config.h"
 #include "NWK_INTERFACE/Include/protocol.h"
 #include "6LoWPAN/ws/ws_config.h"
+#include "Security/protocols/sec_prot_cfg.h"
 #include "Security/kmp/kmp_addr.h"
 #include "Security/kmp/kmp_api.h"
 #include "Security/PANA/pana_eap_header.h"
@@ -72,10 +73,8 @@ typedef struct {
     bool                          send_pending: 1;  /**< TLS data is not yet send to network */
 } eap_tls_sec_prot_int_t;
 
-#define FWH_RETRY_TIMEOUT_SMALL 330*10 // retry timeout for small network additional 30 seconds for authenticator delay
-#define FWH_RETRY_TIMEOUT_LARGE 750*10 // retry timeout for large network additional 30 seconds for authenticator delay
-
-static uint16_t retry_timeout = FWH_RETRY_TIMEOUT_SMALL;
+#define EAP_TLS_RETRY_TIMEOUT_SMALL 330*10 // retry timeout for small network additional 30 seconds for authenticator delay
+#define EAP_TLS_RETRY_TIMEOUT_LARGE 750*10 // retry timeout for large network additional 30 seconds for authenticator delay
 
 static uint16_t supp_eap_tls_sec_prot_size(void);
 static int8_t supp_eap_tls_sec_prot_init(sec_prot_t *prot);
@@ -93,7 +92,7 @@ static void supp_eap_tls_sec_prot_timer_timeout(sec_prot_t *prot, uint16_t ticks
 static int8_t supp_eap_tls_sec_prot_init_tls(sec_prot_t *prot);
 static void supp_eap_tls_sec_prot_delete_tls(sec_prot_t *prot);
 
-static void supp_eap_tls_sec_prot_seq_id_update(sec_prot_t *prot);
+static bool supp_eap_tls_sec_prot_seq_id_update(sec_prot_t *prot);
 
 #define eap_tls_sec_prot_get(prot) (eap_tls_sec_prot_int_t *) &prot->data
 
@@ -109,17 +108,6 @@ int8_t supp_eap_tls_sec_prot_register(kmp_service_t *service)
 
     return 0;
 }
-
-int8_t supp_eap_sec_prot_timing_adjust(uint8_t timing)
-{
-    if (timing < 16) {
-        retry_timeout = FWH_RETRY_TIMEOUT_SMALL;
-    } else {
-        retry_timeout = FWH_RETRY_TIMEOUT_LARGE;
-    }
-    return 0;
-}
-
 
 static uint16_t supp_eap_tls_sec_prot_size(void)
 {
@@ -415,8 +403,8 @@ static void supp_eap_tls_sec_prot_state_machine(sec_prot_t *prot)
                 return;
             }
 
-            // Set default timeout for the total maximum length of the negotiation
-            sec_prot_default_timeout_set(&data->common);
+            // Set retry timeout based on network size
+            data->common.ticks = prot->sec_cfg->prot_cfg.sec_prot_retry_timeout;
 
             // Store sequence ID
             supp_eap_tls_sec_prot_seq_id_update(prot);
@@ -461,11 +449,14 @@ static void supp_eap_tls_sec_prot_state_machine(sec_prot_t *prot)
             supp_eap_tls_sec_prot_seq_id_update(prot);
 
             sec_prot_state_set(prot, &data->common, EAP_TLS_STATE_REQUEST);
-            data->common.ticks = retry_timeout;
+            data->common.ticks = prot->sec_cfg->prot_cfg.sec_prot_retry_timeout;
 
             // Initialize TLS protocol
             if (supp_eap_tls_sec_prot_init_tls(prot) < 0) {
                 tr_error("TLS init failed");
+                // If fatal error terminates EAP-TLS
+                sec_prot_result_set(&data->common, SEC_RESULT_ERROR);
+                sec_prot_state_set(prot, &data->common, EAP_TLS_STATE_FINISH);
                 return;
             }
             // Request TLS to start (send client hello)
@@ -490,7 +481,10 @@ static void supp_eap_tls_sec_prot_state_machine(sec_prot_t *prot)
                 }
 
                 // Store sequence ID
-                supp_eap_tls_sec_prot_seq_id_update(prot);
+                if (supp_eap_tls_sec_prot_seq_id_update(prot)) {
+                    // When receiving a new sequence number, adds more time for re-send if no response
+                    data->common.ticks = prot->sec_cfg->prot_cfg.sec_prot_retry_timeout;
+                }
 
                 // All fragments received for a message
                 if (result == EAP_TLS_MSG_RECEIVE_DONE && data->tls_ongoing) {
@@ -508,7 +502,12 @@ static void supp_eap_tls_sec_prot_state_machine(sec_prot_t *prot)
                 }
             } else {
                 data->wait_tls = false;
-                if (!data->tls_send.data || data->tls_result == EAP_TLS_RESULT_HANDSHAKE_FATAL_ERROR) {
+                if (data->tls_result == EAP_TLS_RESULT_HANDSHAKE_FATAL_ERROR) {
+                    // If fatal error terminates EAP-TLS (TLS init has failed)
+                    sec_prot_result_set(&data->common, SEC_RESULT_ERROR);
+                    sec_prot_state_set(prot, &data->common, EAP_TLS_STATE_FINISH);
+                    return;
+                } else if (!data->tls_send.data) {
                     // If no more data send response, TLS EAP (empty)
                     eap_tls_sec_prot_lib_message_allocate(&data->tls_send, TLS_HEAD_LEN, 0);
                 }
@@ -516,10 +515,6 @@ static void supp_eap_tls_sec_prot_state_machine(sec_prot_t *prot)
             // Send EAP response
             supp_eap_tls_sec_prot_message_send(prot, EAP_RESPONSE, EAP_TLS, EAP_TLS_EXCHANGE_ONGOING);
             data->send_pending = false;
-
-            // Add more time for re-send if no response
-            data->common.ticks = retry_timeout;
-
             break;
 
         case EAP_TLS_STATE_FINISH:
@@ -542,10 +537,16 @@ static void supp_eap_tls_sec_prot_state_machine(sec_prot_t *prot)
     }
 }
 
-static void supp_eap_tls_sec_prot_seq_id_update(sec_prot_t *prot)
+static bool supp_eap_tls_sec_prot_seq_id_update(sec_prot_t *prot)
 {
     eap_tls_sec_prot_int_t *data = eap_tls_sec_prot_get(prot);
+    bool new_seq_id = false;
+
+    if (data->recv_eapol_pdu.msg.eap.id_seq > data->eap_id_seq) {
+        new_seq_id = true;
+    }
     data->eap_id_seq = data->recv_eapol_pdu.msg.eap.id_seq;
+    return new_seq_id;
 }
 
 #endif /* HAVE_WS */

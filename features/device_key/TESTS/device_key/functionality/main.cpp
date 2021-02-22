@@ -15,6 +15,7 @@
  */
 
 #include "DeviceKey.h"
+#include "mbedtls/config.h"
 #include "utest/utest.h"
 #include "mbed_error.h"
 #include "unity/unity.h"
@@ -51,7 +52,7 @@ void generate_derived_key_consistency_32_byte_key_long_consistency_test(char *ke
  */
 int inject_dummy_rot_key()
 {
-#if !DEVICE_TRNG
+#if !DEVICE_TRNG && !defined(MBEDTLS_ENTROPY_HARDWARE_ALT)
     uint32_t key[DEVICE_KEY_16BYTE / sizeof(uint32_t)];
 
     memcpy(key, "1234567812345678", DEVICE_KEY_16BYTE);
@@ -71,10 +72,12 @@ void generate_derived_key_long_consistency_test()
     generate_derived_key_consistency_16_byte_key_long_consistency_test(key);
     strcpy(key, MSG_KEY_DEVICE_TEST_STEP2);
     generate_derived_key_consistency_16_byte_key_long_consistency_test(key);
+#ifndef MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH
     strcpy(key, MSG_KEY_DEVICE_TEST_STEP3);
     generate_derived_key_consistency_32_byte_key_long_consistency_test(key);
     strcpy(key, MSG_KEY_DEVICE_TEST_STEP4);
     generate_derived_key_consistency_32_byte_key_long_consistency_test(key);
+#endif
 
 }
 
@@ -475,12 +478,16 @@ Case cases[] = {
     Case("Device Key - long consistency test",               generate_derived_key_long_consistency_test,        greentea_failure_handler),
     Case("Device Key - inject value wrong size",             device_inject_root_of_trust_wrong_size_test,       greentea_failure_handler),
     Case("Device Key - inject value 16 byte size",           device_inject_root_of_trust_16_byte_size_test,     greentea_failure_handler),
+#ifndef MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH
     Case("Device Key - inject value 32 byte size",           device_inject_root_of_trust_32_byte_size_test,     greentea_failure_handler),
+#endif
     Case("Device Key - inject value several times",          device_inject_root_of_trust_several_times_test,    greentea_failure_handler),
     Case("Device Key - derived key consistency 16 byte key", generate_derived_key_consistency_16_byte_key_test, greentea_failure_handler),
     Case("Device Key - derived key consistency 32 byte key", generate_derived_key_consistency_32_byte_key_test, greentea_failure_handler),
     Case("Device Key - derived key key type 16",             generate_derived_key_key_type_16_test,             greentea_failure_handler),
+#ifndef MBEDTLS_AES_ONLY_128_BIT_KEY_LENGTH
     Case("Device Key - derived key key type 32",             generate_derived_key_key_type_32_test,             greentea_failure_handler),
+#endif
     Case("Device Key - derived key wrong key type",          generate_derived_key_wrong_key_type_test,          greentea_failure_handler)
 };
 

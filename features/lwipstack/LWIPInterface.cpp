@@ -37,6 +37,7 @@
 #include "lwip/udp.h"
 
 #include "LWIPStack.h"
+#include "lwip_tools.h"
 
 LWIP::Interface *LWIP::Interface::list;
 
@@ -227,7 +228,13 @@ void LWIP::Interface::netif_status_irq(struct netif *netif)
 
         if (interface->has_addr_state & HAS_ANY_ADDR) {
             interface->connected = NSAPI_STATUS_GLOBAL_UP;
+#if LWIP_IPV6
+            if (ip_addr_islinklocal(get_ipv6_addr(netif))) {
+                interface->connected = NSAPI_STATUS_LOCAL_UP;
+            }
+#endif
         }
+
     } else if (!netif_is_up(&interface->netif) && netif_is_link_up(&interface->netif)) {
         interface->connected = NSAPI_STATUS_DISCONNECTED;
     }
@@ -271,6 +278,56 @@ char *LWIP::Interface::get_interface_name(char *buf)
     return buf;
 }
 
+nsapi_error_t LWIP::Interface::get_ipv6_link_local_address(SocketAddress *address)
+{
+#if LWIP_IPV6
+    const ip_addr_t *addr = LWIP::get_ipv6_link_local_addr(&netif);
+    nsapi_addr_t out;
+    bool ret;
+
+    if (!addr) {
+        return NSAPI_ERROR_PARAMETER;
+    }
+
+    ret = convert_lwip_addr_to_mbed(&out, addr);
+    if (ret != true) {
+        return NSAPI_ERROR_PARAMETER;
+    }
+
+    address->set_addr(out);
+
+    return NSAPI_ERROR_OK;
+#else
+    return NSAPI_ERROR_UNSUPPORTED;
+#endif
+}
+
+nsapi_error_t LWIP::Interface::get_ip_address(SocketAddress *address)
+{
+    if (!address) {
+        return NSAPI_ERROR_PARAMETER;
+    }
+    const ip_addr_t *addr = LWIP::get_ip_addr(true, &netif);
+    if (!addr) {
+        return NSAPI_ERROR_NO_ADDRESS;
+    }
+#if LWIP_IPV6
+    if (IP_IS_V6(addr)) {
+        char buf[NSAPI_IPv6_SIZE];
+        address->set_ip_address(ip6addr_ntoa_r(ip_2_ip6(addr), buf, NSAPI_IPv6_SIZE));
+        return NSAPI_ERROR_OK;
+    }
+#endif
+#if LWIP_IPV4
+    if (IP_IS_V4(addr)) {
+        char buf[NSAPI_IPv4_SIZE];
+        address->set_ip_address(ip4addr_ntoa_r(ip_2_ip4(addr), buf, NSAPI_IPv4_SIZE));
+        return NSAPI_ERROR_OK;
+    }
+#endif
+    return NSAPI_ERROR_UNSUPPORTED;
+}
+
 char *LWIP::Interface::get_ip_address(char *buf, nsapi_size_t buflen)
 {
     const ip_addr_t *addr = LWIP::get_ip_addr(true, &netif);
@@ -290,6 +347,36 @@ char *LWIP::Interface::get_ip_address(char *buf, nsapi_size_t buflen)
 #if LWIP_IPV6 && LWIP_IPV4
     return NULL;
 #endif
+}
+
+nsapi_error_t LWIP::Interface::get_ip_address_if(const char *interface_name, SocketAddress *address)
+{
+    if (!address) {
+        return NSAPI_ERROR_PARAMETER;
+    }
+
+    const ip_addr_t *addr;
+
+    if (interface_name == NULL) {
+        addr = LWIP::get_ip_addr(true, &netif);
+    } else {
+        addr = LWIP::get_ip_addr(true, netif_find(interface_name));
+    }
+#if LWIP_IPV6
+    if (IP_IS_V6(addr)) {
+        char buf[NSAPI_IPv6_SIZE];
+        address->set_ip_address(ip6addr_ntoa_r(ip_2_ip6(addr), buf, NSAPI_IPv6_SIZE));
+        return NSAPI_ERROR_OK;
+    }
+#endif
+#if LWIP_IPV4
+    if (IP_IS_V4(addr)) {
+        char buf[NSAPI_IPv4_SIZE];
+        address->set_ip_address(ip4addr_ntoa_r(ip_2_ip4(addr), buf, NSAPI_IPv4_SIZE));
+        return NSAPI_ERROR_OK;
+    }
+#endif
+    return NSAPI_ERROR_UNSUPPORTED;
 }
 
 char *LWIP::Interface::get_ip_address_if(char *buf, nsapi_size_t buflen, const char *interface_name)
@@ -319,6 +406,25 @@ char *LWIP::Interface::get_ip_address_if(char *buf, nsapi_size_t buflen, const c
 #endif
 }
 
+nsapi_error_t LWIP::Interface::get_netmask(SocketAddress *address)
+{
+    if (!address) {
+        return NSAPI_ERROR_PARAMETER;
+    }
+#if LWIP_IPV4
+    const ip4_addr_t *addr = netif_ip4_netmask(&netif);
+    if (!ip4_addr_isany(addr)) {
+        char buf[NSAPI_IPv4_SIZE];
+        address->set_ip_address(ip4addr_ntoa_r(addr, buf, NSAPI_IPv4_SIZE));
+        return NSAPI_ERROR_OK;
+    } else {
+        return NSAPI_ERROR_NO_ADDRESS;
+    }
+#else
+    return NSAPI_ERROR_UNSUPPORTED;
+#endif
+}
+
 char *LWIP::Interface::get_netmask(char *buf, nsapi_size_t buflen)
 {
 #if LWIP_IPV4
@@ -330,6 +436,25 @@ char *LWIP::Interface::get_netmask(char *buf, nsapi_size_t buflen)
     }
 #else
     return NULL;
+#endif
+}
+
+nsapi_error_t LWIP::Interface::get_gateway(SocketAddress *address)
+{
+    if (!address) {
+        return NSAPI_ERROR_PARAMETER;
+    }
+#if LWIP_IPV4
+    const ip4_addr_t *addr = netif_ip4_gw(&netif);
+    if (!ip4_addr_isany(addr)) {
+        char buf[NSAPI_IPv4_SIZE];
+        address->set_ip_address(ip4addr_ntoa_r(addr, buf, NSAPI_IPv4_SIZE));
+        return NSAPI_ERROR_OK;
+    } else {
+        return NSAPI_ERROR_NO_ADDRESS;
+    }
+#else
+    return NSAPI_ERROR_UNSUPPORTED;
 #endif
 }
 
@@ -369,6 +494,11 @@ LWIP::Interface::Interface() :
     attr.cb_mem = &has_any_addr_sem;
     attr.cb_size = sizeof has_any_addr_sem;
     has_any_addr = osSemaphoreNew(UINT16_MAX, 0, &attr);
+
+    attr.cb_mem = &remove_interface_sem;
+    attr.cb_size = sizeof remove_interface_sem;
+    remove_interface = osSemaphoreNew(UINT16_MAX, 0, &attr);
+
 #if PREF_ADDR_TIMEOUT
     attr.cb_mem = &has_pref_addr_sem;
     attr.cb_size = sizeof has_pref_addr_sem;
@@ -440,6 +570,49 @@ nsapi_error_t LWIP::add_ethernet_interface(EMAC &emac, bool default_if, OnboardN
 #endif //LWIP_ETHERNET
 }
 
+void LWIP::Interface::delete_interface(OnboardNetworkStack::Interface **interface_out)
+{
+#if LWIP_ETHERNET
+    if ((interface_out != NULL) && (*interface_out != NULL)) {
+        LWIP::Interface *lwip = static_cast<Interface *>(*interface_out);
+        LWIP::Interface *node = lwip->list;
+
+        if (lwip->list != NULL) {
+            if (lwip->list == lwip) {
+
+                lwip->list = lwip->list->next;
+                netif_remove(&node->netif);
+                *interface_out = NULL;
+                delete node;
+            } else {
+                while (node->next != NULL && node->next != lwip) {
+                    node = node->next;
+                }
+                if (node->next != NULL && node->next == lwip) {
+                    Interface *remove = node->next;
+                    node->next = node->next->next;
+                    netif_remove(&remove->netif);
+                    *interface_out = NULL;
+                    delete remove;
+                }
+            }
+        }
+        osSemaphoreRelease(lwip->remove_interface);
+    }
+#endif
+}
+
+nsapi_error_t LWIP::remove_ethernet_interface(OnboardNetworkStack::Interface **interface_out)
+{
+#if LWIP_ETHERNET
+    LWIP::Interface *lwip = static_cast<Interface *>(*interface_out);
+    tcpip_callback_with_block((tcpip_callback_fn)&LWIP::Interface::delete_interface, interface_out, 1);
+    osSemaphoreAcquire(lwip->remove_interface, osWaitForever);
+    return NSAPI_ERROR_OK;
+#else
+    return NSAPI_ERROR_UNSUPPORTED;
+#endif //LWIP_ETHERNET
+}
 
 nsapi_error_t LWIP::add_l3ip_interface(L3IP &l3ip, bool default_if, OnboardNetworkStack::Interface **interface_out)
 {

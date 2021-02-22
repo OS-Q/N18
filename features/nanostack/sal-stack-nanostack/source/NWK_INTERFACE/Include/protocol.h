@@ -238,6 +238,7 @@ typedef struct arm_15_4_mac_parameters_t {
     uint16_t pan_id;
     uint16_t mac_short_address;
     mac_cordinator_s mac_cordinator_info;
+    cca_threshold_table_s cca_thr_table;
     uint8_t number_of_fhss_channel_retries;
     /* MAC Beacon info */
     uint8_t *mac_beacon_payload;
@@ -375,6 +376,7 @@ struct protocol_interface_info_entry {
     trickle_params_t mpl_control_trickle_params;
     uint16_t mpl_seed_set_entry_lifetime;
     uint8_t mpl_seed_id[16];
+    struct mpl_domain *mpl_domain;
 #endif
     if_6lowpan_dad_entry_t if_6lowpan_dad_process;
     lowpan_context_list_t lowpan_contexts;

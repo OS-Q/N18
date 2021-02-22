@@ -29,6 +29,7 @@
 #include "sw_mac.h"
 #include "ns_list.h"
 #include "net_interface.h"
+#include "nwk_stats_api.h"
 #include "ws_management_api.h" //ws_management_node_init
 #ifdef MBED_CONF_MBED_MESH_API_CERTIFICATE_HEADER
 #if !defined(MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE) || !defined(MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE) || \
@@ -37,6 +38,7 @@
 #endif
 #include MBED_CONF_MBED_MESH_API_CERTIFICATE_HEADER
 #endif
+
 
 // For tracing we need to define flag, have include and define group
 //#define HAVE_DEBUG
@@ -71,13 +73,6 @@ typedef struct {
 } wisun_tasklet_data_str_t;
 
 typedef struct {
-    char *network_name;
-    uint8_t regulatory_domain;
-    uint8_t rd_operating_class;
-    uint8_t rd_operating_mode;
-} wisun_network_settings_t;
-
-typedef struct {
     arm_certificate_entry_s arm_cert_entry;
     ns_list_link_t      link; /*!< List link entry */
 } wisun_certificate_entry_t;
@@ -90,13 +85,19 @@ typedef struct {
     bool remove_trusted_certificates: 1;
 } wisun_certificates_t;
 
-#define WS_NA 0xff  // Not applicable value
-
 /* Tasklet data */
 static wisun_tasklet_data_str_t *wisun_tasklet_data_ptr = NULL;
 static wisun_certificates_t *wisun_certificates_ptr = NULL;
-static wisun_network_settings_t wisun_settings_str = {NULL, MBED_CONF_MBED_MESH_API_WISUN_REGULATORY_DOMAIN, MBED_CONF_MBED_MESH_API_WISUN_OPERATING_CLASS, MBED_CONF_MBED_MESH_API_WISUN_OPERATING_MODE};
 static mac_api_t *mac_api = NULL;
+
+typedef struct {
+    nwk_stats_t nwk_stats;
+    mac_statistics_t mac_statistics;
+    ws_statistics_t ws_statistics;
+} wisun_statistics_t;
+
+static bool statistics_started = false;
+static wisun_statistics_t *statistics = NULL;
 
 extern fhss_timer_t fhss_functions;
 
@@ -108,6 +109,7 @@ static void wisun_tasklet_configure_and_connect_to_network(void);
 static void wisun_tasklet_clear_stored_certificates(void) ;
 static int wisun_tasklet_store_certificate_data(const uint8_t *cert, uint16_t cert_len, const uint8_t *cert_key, uint16_t cert_key_len, bool remove_own, bool remove_trusted, bool trusted_cert);
 static int wisun_tasklet_add_stored_certificates(void) ;
+static void wisun_tasklet_statistics_do_start(void);
 
 /*
  * \brief A function which will be eventually called by NanoStack OS when ever the OS has an event to deliver.
@@ -174,11 +176,9 @@ static void wisun_tasklet_parse_network_event(arm_event_s *event)
     switch (status) {
         case ARM_NWK_BOOTSTRAP_READY:
             /* Network is ready and node is connected to Access Point */
-            if (wisun_tasklet_data_ptr->tasklet_state != TASKLET_STATE_BOOTSTRAP_READY) {
-                tr_info("Wi-SUN bootstrap ready");
-                wisun_tasklet_data_ptr->tasklet_state = TASKLET_STATE_BOOTSTRAP_READY;
-                wisun_tasklet_network_state_changed(MESH_CONNECTED);
-            }
+            tr_info("Wi-SUN bootstrap ready");
+            wisun_tasklet_data_ptr->tasklet_state = TASKLET_STATE_BOOTSTRAP_READY;
+            wisun_tasklet_network_state_changed(MESH_CONNECTED);
             break;
         case ARM_NWK_NWK_SCAN_FAIL:
             /* Link Layer Active Scan Fail, Stack is Already at Idle state */
@@ -232,7 +232,12 @@ static void wisun_tasklet_configure_and_connect_to_network(void)
     int status;
     fhss_timer_t *fhss_timer_ptr = &fhss_functions;
 
-    wisun_tasklet_data_ptr->operating_mode = NET_6LOWPAN_ROUTER;
+    if (MBED_CONF_MBED_MESH_API_WISUN_DEVICE_TYPE == MESH_DEVICE_TYPE_WISUN_BORDER_ROUTER) {
+        wisun_tasklet_data_ptr->operating_mode = NET_6LOWPAN_BORDER_ROUTER;
+    } else {
+        wisun_tasklet_data_ptr->operating_mode = NET_6LOWPAN_ROUTER;
+    }
+
     wisun_tasklet_data_ptr->operating_mode_extension = NET_6LOWPAN_WS;
 
     arm_nwk_interface_configure_6lowpan_bootstrap_set(
@@ -245,40 +250,70 @@ static void wisun_tasklet_configure_and_connect_to_network(void)
         return;
     }
 
+    char network_name[33];
+    status = ws_management_network_name_get(wisun_tasklet_data_ptr->network_interface_id, (char *) &network_name);
+    if (status < 0) {
+        tr_error("Failed to read network name");
+        return;
+    }
+    uint8_t regulatory_domain;
+    uint8_t operating_class;
+    uint8_t operating_mode;
+    status = ws_management_regulatory_domain_get(wisun_tasklet_data_ptr->network_interface_id,
+                                                 &regulatory_domain,
+                                                 &operating_class,
+                                                 &operating_mode);
+    if (status < 0) {
+        tr_error("Failed to read regulatory domain");
+        return;
+    }
     status = ws_management_node_init(wisun_tasklet_data_ptr->network_interface_id,
-                                     MBED_CONF_MBED_MESH_API_WISUN_REGULATORY_DOMAIN,
-                                     wisun_settings_str.network_name,
+                                     regulatory_domain,
+                                     (char *) network_name,
                                      fhss_timer_ptr);
     if (status < 0) {
         tr_error("Failed to initialize WS");
         return;
     }
 
-    if (wisun_settings_str.regulatory_domain != WS_NA ||
-            wisun_settings_str.rd_operating_class != WS_NA ||
-            wisun_settings_str.rd_operating_mode != WS_NA) {
-        status = ws_management_regulatory_domain_set(wisun_tasklet_data_ptr->network_interface_id,
-                                                     wisun_settings_str.regulatory_domain,
-                                                     wisun_settings_str.rd_operating_class,
-                                                     wisun_settings_str.rd_operating_mode);
-
-        if (status < 0) {
-            tr_error("Failed to set regulatory domain!");
-            return;
-        }
-    }
-
 #if defined(MBED_CONF_MBED_MESH_API_CERTIFICATE_HEADER)
-    arm_certificate_chain_entry_s chain_info;
-    memset(&chain_info, 0, sizeof(arm_certificate_chain_entry_s));
-    chain_info.cert_chain[0] = (const uint8_t *) MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE;
-    chain_info.cert_len[0] = strlen((const char *) MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE) + 1;
-    chain_info.cert_chain[1] = (const uint8_t *) MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE;
-    chain_info.cert_len[1] = strlen((const char *) MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE) + 1;
-    chain_info.key_chain[1] = (const uint8_t *) MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_KEY;
-    chain_info.chain_length = 2;
-    arm_network_certificate_chain_set((const arm_certificate_chain_entry_s *) &chain_info);
+    arm_certificate_entry_s trusted_cert = {
+        .cert = MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE,
+        .key = NULL,
+        .cert_len = 0,
+        .key_len = 0
+    };
+#ifdef MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE_LEN
+    trusted_cert.cert_len = MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE_LEN;
+#else
+    trusted_cert.cert_len = strlen((const char *) MBED_CONF_MBED_MESH_API_ROOT_CERTIFICATE) + 1;
 #endif
+    arm_network_trusted_certificates_remove();
+    arm_network_trusted_certificate_add((const arm_certificate_entry_s *)&trusted_cert);
+
+    arm_certificate_entry_s own_cert = {
+        .cert = MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE,
+        .key =  MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_KEY,
+        .cert_len = 0,
+        .key_len = 0
+    };
+#ifdef MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_LEN
+    own_cert.cert_len = MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_LEN;
+#else
+    own_cert.cert_len = strlen((const char *) MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE) + 1;
+#endif
+#ifdef MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_KEY_LEN
+    own_cert.key_len = MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_KEY_LEN;
+#else
+    own_cert.key_len = strlen((const char *) MBED_CONF_MBED_MESH_API_OWN_CERTIFICATE_KEY) + 1;
+#endif
+    arm_network_own_certificates_remove();
+    arm_network_own_certificate_add((const arm_certificate_entry_s *)&own_cert);
+#endif
+
+    if (statistics_started) {
+        wisun_tasklet_statistics_do_start();
+    }
 
     status = arm_nwk_interface_up(wisun_tasklet_data_ptr->network_interface_id);
     if (status >= 0) {
@@ -493,7 +528,7 @@ int8_t wisun_tasklet_network_init(int8_t device_id)
 {
     // TODO, read interface name from configuration
     mac_description_storage_size_t storage_sizes;
-    storage_sizes.device_decription_table_size = 32;
+    storage_sizes.device_decription_table_size = MBED_CONF_MBED_MESH_API_MAC_NEIGH_TABLE_SIZE;
     storage_sizes.key_description_table_size = 4;
     storage_sizes.key_lookup_size = 1;
     storage_sizes.key_usage_size = 3;
@@ -501,96 +536,108 @@ int8_t wisun_tasklet_network_init(int8_t device_id)
         mac_api = ns_sw_mac_create(device_id, &storage_sizes);
     }
 
-    if (!wisun_settings_str.network_name) {
-        // No network name set by API, use network name from configuration
-        int wisun_network_name_len = sizeof(MBED_CONF_MBED_MESH_API_WISUN_NETWORK_NAME);
-        wisun_settings_str.network_name = (char *)ns_dyn_mem_alloc(wisun_network_name_len);
-        if (!wisun_settings_str.network_name) {
-            return -3;
-        }
-        strncpy(wisun_settings_str.network_name, MBED_CONF_MBED_MESH_API_WISUN_NETWORK_NAME, wisun_network_name_len);
-    }
-
     return arm_nwk_interface_lowpan_init(mac_api, INTERFACE_NAME);
-}
-
-int wisun_tasklet_set_network_name(int8_t nwk_interface_id, char *network_name_ptr)
-{
-    if (!network_name_ptr || strlen(network_name_ptr) > 32) {
-        return -1;
-    }
-
-    // save the network name to have support for disconnect/connect
-    ns_dyn_mem_free(wisun_settings_str.network_name);
-    wisun_settings_str.network_name = (char *)ns_dyn_mem_alloc(strlen(network_name_ptr) + 1);
-    if (!wisun_settings_str.network_name) {
-        return -2;
-    }
-
-    strcpy(wisun_settings_str.network_name, network_name_ptr);
-
-    if (wisun_tasklet_data_ptr && wisun_tasklet_data_ptr->tasklet_state == TASKLET_STATE_BOOTSTRAP_READY) {
-        // interface is up, try to change name dynamically
-        return ws_management_network_name_set(nwk_interface_id, wisun_settings_str.network_name);
-    }
-
-    return 0;
-}
-
-int wisun_tasklet_set_regulatory_domain(int8_t nwk_interface_id, uint8_t regulatory_domain, uint8_t operating_class, uint8_t operating_mode)
-{
-    int status = 0;
-
-    wisun_settings_str.regulatory_domain = regulatory_domain;
-    wisun_settings_str.rd_operating_class = operating_class;
-    wisun_settings_str.rd_operating_mode = operating_mode;
-
-    if (wisun_tasklet_data_ptr && wisun_tasklet_data_ptr->tasklet_state == TASKLET_STATE_BOOTSTRAP_READY) {
-        status = ws_management_regulatory_domain_set(nwk_interface_id, regulatory_domain, operating_class, operating_mode);
-    }
-
-    return status;
 }
 
 int wisun_tasklet_set_own_certificate(uint8_t *cert, uint16_t cert_len, uint8_t *cert_key, uint16_t cert_key_len)
 {
-    if (wisun_tasklet_data_ptr) {
-        // this API can be only used before first connect()
-        tr_err("Already connected");
-        return -2;
+    if (wisun_tasklet_data_ptr && wisun_tasklet_data_ptr->network_interface_id != INVALID_INTERFACE_ID) {
+        // interface already active write certificates to stack.
+        arm_certificate_entry_s arm_cert_entry;
+        arm_cert_entry.cert = cert;
+        arm_cert_entry.cert_len = cert_len;
+        arm_cert_entry.key = cert_key;
+        arm_cert_entry.key_len = cert_key_len;
+        return arm_network_own_certificate_add(&arm_cert_entry);
     }
-
+    // Stack is inactive store the certificates and activate when connect() called
     return wisun_tasklet_store_certificate_data(cert, cert_len, cert_key, cert_key_len, false, false, false);
 }
 
 int wisun_tasklet_remove_own_certificates(void)
 {
-    if (wisun_tasklet_data_ptr) {
-        // this API can be only used before first connect()
-        tr_err("Already connected");
-        return -2;
-    }
-
     return wisun_tasklet_store_certificate_data(NULL, 0, NULL, 0, true, false, false);
 }
 
 int wisun_tasklet_remove_trusted_certificates(void)
 {
-    if (wisun_tasklet_data_ptr) {
-        // this API can be only used before first connect()
-        tr_err("Already connected");
-        return -2;
-    }
-
     return wisun_tasklet_store_certificate_data(NULL, 0, NULL, 0, false, true, false);
 }
 
 int wisun_tasklet_set_trusted_certificate(uint8_t *cert, uint16_t cert_len)
 {
-    if (wisun_tasklet_data_ptr) {
-        // this API can be only used before first connect()
-        tr_err("Already connected");
-        return -2;
+    if (wisun_tasklet_data_ptr && wisun_tasklet_data_ptr->network_interface_id != INVALID_INTERFACE_ID) {
+        // interface already active write certificates to stack.
+        arm_certificate_entry_s arm_cert_entry;
+        arm_cert_entry.cert = cert;
+        arm_cert_entry.cert_len = cert_len;
+        arm_cert_entry.key = NULL;
+        arm_cert_entry.key_len = 0;
+        return arm_network_trusted_certificate_add(&arm_cert_entry);
     }
+    // Stack is inactive store the certificates and activate when connect() called
     return wisun_tasklet_store_certificate_data(cert, cert_len, NULL, 0, false, false, true);
+}
+
+int wisun_tasklet_statistics_start(void)
+{
+    statistics_started = true;
+
+    if (statistics == NULL) {
+        statistics = ns_dyn_mem_alloc(sizeof(wisun_statistics_t));
+    }
+    if (statistics == NULL) {
+        return -1;
+    }
+    memset(statistics, 0, sizeof(wisun_statistics_t));
+
+    wisun_tasklet_statistics_do_start();
+
+    return 0;
+}
+
+static void wisun_tasklet_statistics_do_start(void)
+{
+    if (!wisun_tasklet_data_ptr || wisun_tasklet_data_ptr->network_interface_id < 0 || !mac_api) {
+        return;
+    }
+
+    protocol_stats_start(&statistics->nwk_stats);
+    ns_sw_mac_statistics_start(mac_api, &statistics->mac_statistics);
+    ws_statistics_start(wisun_tasklet_data_ptr->network_interface_id, &statistics->ws_statistics);
+}
+
+int wisun_tasklet_statistics_nw_read(mesh_nw_statistics_t *stats)
+{
+    if (!statistics || !stats) {
+        return -1;
+    }
+
+    stats->rpl_total_memory = statistics->nwk_stats.rpl_total_memory;
+    stats->etx_1st_parent = statistics->nwk_stats.etx_1st_parent;
+    stats->etx_2nd_parent = statistics->nwk_stats.etx_2nd_parent;
+    stats->asynch_tx_count = statistics->ws_statistics.asynch_tx_count;
+    stats->asynch_rx_count = statistics->ws_statistics.asynch_rx_count;
+
+    return 0;
+}
+
+int wisun_tasklet_statistics_mac_read(mesh_mac_statistics_t *stats)
+{
+    if (!statistics || !stats) {
+        return -1;
+    }
+
+    stats->mac_rx_count = statistics->mac_statistics.mac_rx_count;
+    stats->mac_tx_count = statistics->mac_statistics.mac_tx_count;
+    stats->mac_bc_rx_count = statistics->mac_statistics.mac_bc_rx_count;
+    stats->mac_bc_tx_count = statistics->mac_statistics.mac_bc_tx_count;
+    stats->mac_tx_bytes = statistics->mac_statistics.mac_tx_bytes;
+    stats->mac_rx_bytes = statistics->mac_statistics.mac_rx_bytes;
+    stats->mac_tx_failed_count = statistics->mac_statistics.mac_tx_failed_count;
+    stats->mac_retry_count = statistics->mac_statistics.mac_retry_count;
+    stats->mac_cca_attempts_count = statistics->mac_statistics.mac_cca_attempts_count;
+    stats->mac_failed_cca_count = statistics->mac_statistics.mac_failed_cca_count;
+
+    return 0;
 }

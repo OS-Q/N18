@@ -90,7 +90,7 @@ static int mac_sec_mib_frame_counter_key_buffer_allocate(protocol_interface_rf_m
     mlme_key_descriptor_t *key_descriptor_list = rf_mac_setup->key_description_table;
     uint32_t *frame_counter_pointer = rf_mac_setup->key_device_frame_counter_list_buffer;
     for (uint8_t i = 0; i < rf_mac_setup->key_description_table_size; i++) {
-        key_descriptor_list->KeyDeviceFrameCouterList = frame_counter_pointer;
+        key_descriptor_list->KeyDeviceFrameCounterList = frame_counter_pointer;
         key_descriptor_list->KeyFrameCounterPerKey = true;
         key_descriptor_list->KeyFrameCounter = 0;
         //Update Pointers
@@ -105,7 +105,7 @@ static void mac_sec_mib_frame_counter_key_buffer_free(protocol_interface_rf_mac_
 {
     mlme_key_descriptor_t *key_descriptor_list = rf_mac_setup->key_description_table;
     for (uint8_t i = 0; i < rf_mac_setup->key_description_table_size; i++) {
-        key_descriptor_list->KeyDeviceFrameCouterList = NULL;
+        key_descriptor_list->KeyDeviceFrameCounterList = NULL;
         key_descriptor_list->KeyFrameCounterPerKey = false;
         //Update Pointers
         key_descriptor_list++;
@@ -115,7 +115,7 @@ static void mac_sec_mib_frame_counter_key_buffer_free(protocol_interface_rf_mac_
     rf_mac_setup->secFrameCounterPerKey = false;
 }
 
-static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac16(protocol_interface_rf_mac_setup_s *rf_mac_setup, uint16_t mac16)
+static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac16(protocol_interface_rf_mac_setup_s *rf_mac_setup, uint16_t mac16, uint16_t pan_id)
 {
 
     mlme_device_descriptor_t *device_table = rf_mac_setup->device_description_table;
@@ -124,7 +124,7 @@ static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac16(pro
     }
 
     for (int i = 0; i < rf_mac_setup->device_description_table_size; i++) {
-        if (device_table->ShortAddress == mac16) {
+        if ((pan_id == 0xffff || device_table->PANId == pan_id) && device_table->ShortAddress == mac16) {
             return device_table;
         }
         device_table++;
@@ -133,7 +133,7 @@ static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac16(pro
     return NULL;
 }
 
-static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac64(protocol_interface_rf_mac_setup_s *rf_mac_setup, const uint8_t *mac64)
+static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac64(protocol_interface_rf_mac_setup_s *rf_mac_setup, const uint8_t *mac64, uint16_t pan_id)
 {
 
     mlme_device_descriptor_t *device_table = rf_mac_setup->device_description_table;
@@ -142,8 +142,10 @@ static mlme_device_descriptor_t *mac_sec_mib_device_description_get_by_mac64(pro
     }
 
     for (int i = 0; i < rf_mac_setup->device_description_table_size; i++) {
-        if (memcmp(device_table->ExtAddress, mac64, 8) == 0) {
-            return device_table;
+        if ((pan_id == 0xffff || device_table->PANId == pan_id)) {
+            if (memcmp(device_table->ExtAddress, mac64, 8) == 0) {
+                return device_table;
+            }
         }
         device_table++;
     }
@@ -279,6 +281,7 @@ int8_t mac_sec_mib_device_description_set(uint8_t atribute_index, mlme_device_de
         return -1;
     }
 
+    platform_enter_critical();
     mlme_device_descriptor_t *device_ptr = rf_mac_setup->device_description_table + atribute_index;
 
     //Copy description
@@ -291,6 +294,9 @@ int8_t mac_sec_mib_device_description_set(uint8_t atribute_index, mlme_device_de
     //tr_debug("Set %u, mac16 %x mac64: %s, %"PRIu32, atribute_index, device_descriptor->ShortAddress, trace_array(device_descriptor->ExtAddress, 8), device_descriptor->FrameCounter);
 
     *device_ptr = *device_descriptor;
+
+    platform_exit_critical();
+
     return 0;
 }
 
@@ -347,7 +353,7 @@ int8_t mac_sec_mib_key_description_set(uint8_t atribute_index, mlme_key_descript
         key_ptr->KeyFrameCounter = 0;
         if (key_ptr->KeyDeviceListEntries == 0) {
             //Clear all frame counters from old possible user's
-            uint32_t *counter_ptr = key_ptr->KeyDeviceFrameCouterList;
+            uint32_t *counter_ptr = key_ptr->KeyDeviceFrameCounterList;
             for (int i = 0; i < rf_mac_setup->device_description_table_size; i++) {
                 *counter_ptr++ = 0;
             }
@@ -365,14 +371,30 @@ mlme_device_descriptor_t *mac_sec_mib_device_description_get_attribute_index(pro
     return rf_mac_setup->device_description_table + attribute_index;
 }
 
-mlme_device_descriptor_t *mac_sec_mib_device_description_get(protocol_interface_rf_mac_setup_s *rf_mac_setup, const uint8_t *address, uint8_t type)
+void mac_sec_mib_device_description_pan_update(protocol_interface_rf_mac_setup_s *rf_mac_setup, uint16_t pan_id)
+{
+    mlme_device_descriptor_t *device_table = rf_mac_setup->device_description_table;
+    if (!device_table) {
+        return;
+    }
+
+    for (int i = 0; i < rf_mac_setup->device_description_table_size; i++) {
+
+        device_table->PANId = pan_id;
+        device_table++;
+    }
+
+}
+
+
+mlme_device_descriptor_t *mac_sec_mib_device_description_get(protocol_interface_rf_mac_setup_s *rf_mac_setup, const uint8_t *address, uint8_t type, uint16_t pan_id)
 {
     if (rf_mac_setup) {
         if (type == MAC_ADDR_MODE_16_BIT) {
             uint16_t short_id = common_read_16_bit(address);
-            return  mac_sec_mib_device_description_get_by_mac16(rf_mac_setup, short_id);
+            return  mac_sec_mib_device_description_get_by_mac16(rf_mac_setup, short_id, pan_id);
         } else if (type == MAC_ADDR_MODE_64_BIT) {
-            return mac_sec_mib_device_description_get_by_mac64(rf_mac_setup, address);
+            return mac_sec_mib_device_description_get_by_mac64(rf_mac_setup, address, pan_id);
         }
     }
 
@@ -576,7 +598,7 @@ void mac_sec_mib_key_outgoing_frame_counter_decrement(struct protocol_interface_
 void mac_sec_mib_key_device_frame_counter_set(mlme_key_descriptor_t *key_descpription_table, mlme_device_descriptor_t *device_info, uint32_t frame_counter, uint8_t attribute_index)
 {
     if (key_descpription_table->KeyFrameCounterPerKey) {
-        uint32_t *counter_ptr = key_descpription_table->KeyDeviceFrameCouterList + attribute_index;
+        uint32_t *counter_ptr = key_descpription_table->KeyDeviceFrameCounterList + attribute_index;
         *counter_ptr = frame_counter;
     } else {
         device_info->FrameCounter = frame_counter;
@@ -586,7 +608,7 @@ void mac_sec_mib_key_device_frame_counter_set(mlme_key_descriptor_t *key_descpri
 uint32_t mac_mib_key_device_frame_counter_get(mlme_key_descriptor_t *key_descpription_table, mlme_device_descriptor_t *device_info, uint8_t attribute_index)
 {
     if (key_descpription_table->KeyFrameCounterPerKey) {
-        uint32_t *counter_ptr = key_descpription_table->KeyDeviceFrameCouterList + attribute_index;
+        uint32_t *counter_ptr = key_descpription_table->KeyDeviceFrameCounterList + attribute_index;
         return *counter_ptr;
     }
     return device_info->FrameCounter;

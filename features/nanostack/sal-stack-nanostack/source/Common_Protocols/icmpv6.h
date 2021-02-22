@@ -77,6 +77,8 @@
 #define ICMPV6_OPT_REDIRECTED_HDR                   4
 #define ICMPV6_OPT_MTU                              5
 #define ICMPV6_OPT_ROUTE_INFO                       24
+#define ICMPV6_OPT_RECURSIVE_DNS_SERVER             25
+#define ICMPV6_OPT_DNS_SEARCH_LIST                  31
 #define ICMPV6_OPT_ADDR_REGISTRATION                33
 #define ICMPV6_OPT_6LOWPAN_CONTEXT                  34
 #define ICMPV6_OPT_AUTHORITATIVE_BORDER_RTR         35
@@ -117,6 +119,7 @@ typedef enum slaac_src {
 #define ARO_SUCCESS     0
 #define ARO_DUPLICATE   1
 #define ARO_FULL        2
+#define ARO_TOPOLOGICALLY_INCORRECT 8
 
 extern void icmpv6_init(void);
 extern struct buffer *icmpv6_down(struct buffer *buf);
